@@ -1,0 +1,672 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+date: "9/11/2023"
+geometry: margin=1.0cm
+header-includes:
+   - \usepackage[spanish]{babel}
+   - \usepackage[utf8]{inputenc}
+   - \decimalpoint
+   - "\\fontsize{1}{3}\\selectfont"
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(4.0, 3.0),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+```
+
+```{r Librerias, include = FALSE}
+#Librerias
+library(ISLR)
+library(dplyr)
+library(tidyr)
+library(forcats)
+library(broom)
+library(ggplot2)
+
+## Selección de variables
+library(leaps)
+library(MASS)
+library(bestglm)
+library(glmnet)
+library(faraway)
+library(gridExtra)
+```
+
+\section{Selección de variables clínicas para modelar el promedio del porcentaje de grasa corporal en hombres}
+Es de interés responder a la siguiente pregunta: ¿Que variables clínicas modelan de manera óptima el promedio del porcentaje de grasa corporal en los hombres?
+
+Como parte de un análisis exploratorio de datos preliminar se presentan las siguientes gráficas:
+
+```{r Preprocesamiento, include= FALSE}
+#Obtenemos el dataset fat del paquete faraway
+data(fat)
+View(fat)
+#Obtenemos los nombres
+names(fat)
+
+#Realizamos un summary del dataset fat
+summary(fat)
+str(fat)
+
+#Eliminamos las variables innecesarias, para ello usamos la función subset() de R
+#En este caso las variables que deseamos eliminar son siri, density y free y almacenamos el resultado en la variable fat
+fat <- subset(fat, select = -c(siri, density, free))
+fat
+names(fat)
+
+#Realizamos un summary después de quitar las variables siri, densiry y free
+summary(fat)
+
+```
+
+```{r GraficaPesoyAltura_DatosNoProcesados, include = TRUE}
+
+### Grafica weight vs brozek
+plot1 <- ggplot(data = fat, mapping = aes(x = weight, y = brozek)) + 
+  geom_point(color = "blue") + 
+  ggtitle("Peso vs Grasa") +
+  theme(plot.title = element_text(size = 8)) +
+scale_x_continuous(limits = c(100, 400), breaks = seq(0, 400, by = 50))
+
+
+### Grafica height vs brozek
+plot2 <- ggplot(data = fat, mapping = aes(x = height, y = brozek)) + 
+  geom_point(color = "red") + 
+  ggtitle("Altura vs Grasa") +
+  theme(plot.title = element_text(size = 8)) 
+
+
+```
+
+
+```{r RemocionCasosExtraños, include = FALSE}
+
+#A partir de lo observado en las gráficas anteriores eliminamos las casos con valores extraños para las variables weight y height 
+# y los valores cero para la variable brozek
+
+
+fat <- fat[fat$weight <= 250, ]
+fat <- fat[fat$height >= 60, ]
+fat <- fat[fat$brozek != 0, ]
+fat
+names(fat)
+summary(fat)
+
+
+### Verificamos si existen valores NA dentro del DataFrame. Tras correr el codigo resulta ser que no existen nulos en el dataset fat
+sum(is.na(fat))
+names(fat)
+
+```
+
+
+```{r GraficaPesoyAltura_DatosProcesados, include = TRUE}
+
+### brozek vs weight 
+plot3 <- ggplot(data = fat, mapping = aes(x = weight, y = brozek)) + 
+  geom_point(color = "blue") + 
+  ggtitle("Peso vs Grasa Post-procesamiento") +
+  theme(plot.title = element_text(size = 8))
+
+
+### brozek vs height
+plot4 <- ggplot(data = fat, mapping = aes(x = height, y = brozek)) + 
+  geom_point(color = "red") + 
+  ggtitle("Altura vs Grasa Post-procesamiento") +
+  theme(plot.title = element_text(size = 8))
+
+```
+
+
+```{r Grid, include = TRUE}
+
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, widths = c(3, 3), heights = c(2, 2))
+
+```
+
+Dado que en el conjunto de datos original se identificaron valores inusuales para las variables de \textit{weight} y \textit{height}, los cuales se alejaban del resto de valores, se realizó primeramente un preprocesamiento de los datos. Esto consistió en la eliminación de aquellas observaciones que mostraban un peso superior a 250 lbs, una altura inferior a 60 pulgadas o un valor de cero para la variable "brozek". Las primeras dos gráficas representan la relación entre las variables indicadas antes de eliminar las observaciones atípicas y las segundas gráficas representan la relación entre las variables después de haber eliminado las obsevaciones atípicas. \textsuperscript{\textbf{[1]}}
+
+En un incio, al comienzo del análisis, se considera el modelo de regresión lineal simple para datos continuos con distribución Gaussiana y liga identidad. 
+
+\begin{equation*}
+    \hat{E(brozek)} = \beta_{0} + \beta_{1}*x_{1} + \beta_{2}x_{2} + 
+     \beta_{3}x_{3} + ..... + \beta_{p}x_{p}
+\end{equation*}
+
+En el modelo anterior solo se consideran los componentes principales. Aqui $\hat{E(brozek)}$ representa el promedio del porcentaje de grasa corporal en hombres y $x_{p}$ representan a las variables que ayudan a modelar de mejor manera el promedio del porcentaje de grasa corporal. De acuerdo a lo solicitado por los investigadores, se procedio a ajustar distintos modelos lineales generalizados del promedio de porcentaje de grasa corporal en hombres después de obtener las variables pertinentes mediante distintos métodos de selección. Los resultados se resumen en las siguientes dos tablas:
+
+
+```{r MejorSubconjunto, include = FALSE}
+
+#----------------------- a) Mejor subconjunto -------------------------------------------------------------------------#
+
+#Procedemos a calcular el mejor subconjunto de variables usando la función regsubsets del paquete leaps
+
+mejor_subconjunto <- regsubsets(brozek ~ age + weight + height + adipos + neck
+                                + chest + abdom + hip + thigh + knee + ankle +
+                                  biceps + forearm + wrist, data = fat,
+                                method = "exhaustive", nvmax = 14)
+
+
+
+#summary del mejor subconjunto
+mejor_sub <- summary(mejor_subconjunto)
+
+
+#Usamos la siguiente grafica para determinar la cantidad de variables con la cual trabajar
+plot(mejor_subconjunto, scale = "bic")
+
+
+### Coeficientes de las covariables que entran al modelo bajo la selección
+### del mejor subconjunto.
+coef(mejor_subconjunto, 3)
+
+### Ajuste que no considera ninguna covariable en el modelado, es decir, Ajuste Nulo
+AjusteNulo <- lm(formula = brozek ~ 1,
+                 data = fat)
+
+### Ajuste con las covariables que entran al modelo bajo la selección
+### del mejor subconjunto
+AjusteMejor_subconjunto <- lm(formula = brozek ~ height + abdom  + wrist,
+                              data = fat)
+summary(AjusteMejor_subconjunto)
+
+### Comparación de BIC
+BIC(AjusteMejor_subconjunto, AjusteNulo)
+
+```
+
+
+
+```{r Forward, include = FALSE }
+
+# ----------------------------- b) Metodo stepwise ---------------------------------------------- #
+# ------------ forward ----------------------------------------------------- #
+
+Metodo_forward <- regsubsets(brozek ~ .,
+                             data = fat,
+                             method = "forward",
+                             nvmax = 14)
+
+
+#Usando la gráfica se encontraron 3 variables
+plot(Metodo_forward, scale = "bic")
+
+
+coef(Metodo_forward, 3)
+
+### Ajuste Nulo: No se consideran covariables en el modelo
+AjusteNulo <- lm(formula = brozek ~ 1,
+                 data = fat)
+
+### Ajuste con las covariables que entran al modelo bajo la selección
+Ajuste_forward <- lm(formula = brozek ~ weight + abdom + wrist,
+                     data = fat)
+summary(Ajuste_forward)
+
+### Comparación de BIC.
+BIC(Ajuste_forward, AjusteNulo)
+
+```
+
+
+```{r Backward, include = FALSE}
+#Además del proceso anterior existe la posibilidad de usar backward con leaps
+Metodo_backward <- regsubsets(brozek ~ .,
+                              data = fat,
+                              method = "backward",
+                              nvmax = 14)
+
+#Usando la siguiente gráfica encontramos x valores
+plot(Metodo_backward, scale = "bic")
+
+
+#Obtenemos las variables con las que debemos trabajar 
+coef(Metodo_backward, 3)
+
+### Ajuste que no considera ninguna covariable en el modelado.
+Ajuste_Nulo <- lm(formula = brozek ~ 1,
+                  data = fat)
+
+### Ajuste con las covariables que entran al modelo bajo la selección backward
+Ajuste_backward <- lm(formula = brozek ~ age + abdom + wrist,
+                      data = fat)
+summary(Ajuste_backward)
+
+### Comparación de BIC.
+BIC(Ajuste_Nulo, Ajuste_backward)
+
+```
+
+```{r Lasso, include = FALSE}
+
+# Cargar la biblioteca bestglm
+library(bestglm)
+
+# Crear la matriz de diseño X y la variable de respuesta y
+X <- model.matrix(object = brozek ~ ., data = fat)
+#View(X)
+#View(fat)
+y <- fat$brozek
+
+# Combinar X y y en un único conjunto de datos
+datos <- cbind(X, y)
+View(datos)
+# Reorganizar las columnas para tener la variable de respuesta al final
+Xy <- datos
+Xy <- as.data.frame(Xy)
+
+is.data.frame(Xy)
+# Eliminamos el intercepto 
+Xy_sin_intercepto <- Xy[, -1]
+
+# Penalización Lasso 
+metodo_lasso <- glmnet(X, y, family = gaussian(link = "identity"), nlambda = 100)
+
+
+
+Lista_modelos <- list()
+Lista_BIC <- list()
+final <- length(metodo_lasso$lambda)
+print(final)
+
+
+
+# Proceso iterativo para ajustar modelos y calcular su respectivo BIC
+for (i in 1:final) {
+  coeficientes <- coef(metodo_lasso)[, i] != 0
+  matriz_variables_X <- X[, coeficientes[-1]] # Excluir el intercepto
+  
+  # Ajustar el modelo con las variables seleccionadas por la penalización Lasso
+  ajuste_lasso <- glm(formula = y ~ ., family = gaussian, data = data.frame(matriz_variables_X, y))
+  
+  Lista_modelos[[i]] <- ajuste_lasso
+  Lista_BIC[[i]] <- BIC(ajuste_lasso)
+}
+
+
+# Se busca el índice del modelo con el mínimo BIC, usamos la función unlist para deshacer la lista Lista_BIC
+min_bic_indice <- which.min(unlist(Lista_BIC))
+
+# Se obtiene el modelo óptimo y sus coeficientes
+modelo_seleccionado <- Lista_modelos[[min_bic_indice]]
+coeficientes <- coefficients(modelo_seleccionado)
+
+
+
+
+# Se imprimen los coeficientes del modelo óptimo y su BIC
+print(coeficientes)
+
+Ajuste_ModeloLasso <- lm(formula = brozek ~ age + height + abdom + wrist, data = fat)
+  
+  
+print(BIC(modelo_seleccionado))
+print(BIC(Ajuste_ModeloLasso))
+
+#summary 
+#summary(modelo_seleccionado)
+summary(Ajuste_ModeloLasso)
+```
+
+```{r backwardInteracciones, include = FALSE}
+
+Metodo_backward_interacciones <- regsubsets(brozek ~ . ^2,
+                              data = fat,
+                              method = "backward",
+                              nvmax = 14)
+
+
+# Establece el tamaño de la gráfica
+png("grafica_backward.png", width = 600, height = 800)
+
+
+#Usando la siguiente gráfica encontramos 4 valores
+plot(Metodo_backward_interacciones, scale = "bic")
+
+
+#Obtenemos las variables con las que debemos trabajar 
+coef(Metodo_backward_interacciones, 4)
+
+### Ajuste que no considera ninguna covariable en el modelado.
+Ajuste_Nulo <- lm(formula = brozek ~ 1,
+                  data = fat)
+
+### Ajuste con las covariables que entran al modelo bajo la selección backward
+Ajuste_backward2 <- lm(formula = brozek ~ hip + height:hip + neck:abdom + neck:hip,
+                      data = fat)
+summary(Ajuste_backward2)
+
+### Comparación de BIC.
+BIC(Ajuste_Nulo, Ajuste_backward2)
+
+```
+
+```{r forwardInteracciones, include = FALSE}
+
+Metodo_forward_interacciones <- regsubsets(brozek ~ . ^2,
+                              data = fat,
+                              method = "forward",
+                              nvmax = 14)
+
+# Establece el tamaño de la gráfica
+png("grafica_forward.png", width = 600, height = 800)
+
+#Usando la siguiente gráfica encontramos 4 valores
+plot(Metodo_forward_interacciones, scale = "bic")
+
+#Obtenemos las variables con las que debemos trabajar 
+coef(Metodo_forward_interacciones, 3)
+
+### Ajuste que no considera ninguna covariable en el modelado.
+Ajuste_Nulo <- lm(formula = brozek ~ 1,
+                  data = fat)
+
+### Ajuste con las covariables que entran al modelo bajo la selección backward
+Ajuste_forward2 <- lm(formula = brozek ~ abdom + height:wrist + chest:hip,
+                      data = fat)
+summary(Ajuste_forward2)
+
+### Comparación de BIC.
+BIC(Ajuste_Nulo, Ajuste_forward2)
+
+```
+
+
+```{r LassoConInteracciones, include = FALSE}
+
+#Matriz diseño considerando interacciones 
+X2 <- model.matrix(object = brozek ~ .^2, data = fat)
+
+#Le quitamos el intercepto 
+X2_aux <- X2[,-1]
+
+
+#Variable y 
+y <- fat$brozek
+
+#Realizamos la penalizacion lasso 
+lasso_inter <- glmnet(X2_aux, y, family <- gaussian(link = "identity"), nlambda = 100)
+
+#Para eso, los coeficientes los vamos a utilizar, y buscaremos los 
+#coeficientes que no son 0 en cada iteración, y lo haremos un dataframe
+coeficientes2 <- data.frame(t(as.matrix(coef(lasso_inter)!=0)))
+
+#Como podemos tener una gran cantidad de valores repetidos con esto, 
+#vamos a aplica la función unique, que nos ayudará a eliminar valores repetidos
+coeficientes2 <- unique(coeficientes2)
+
+
+#Con esto, vamos a obtener la combinación que tiene el menor BIC
+BIC_lasso_comp<-sapply(1:length(coeficientes2$X.Intercept.), function(x){
+  BIC(glm(formula = y ~ X2[,unlist(coeficientes2[x,])] - 1, family = gaussian))}) 
+
+#Utilizamos la segunda forma porque la primera tiene algunas complicaciones
+best_lasso_comp2 <- glm(formula = y ~ X2_aux[,unlist(coeficientes2[which.min(BIC_lasso_comp),c(-1)])], family = gaussian)
+print(coef(best_lasso_comp2))
+
+
+AjusteLasso_Interacciones <- glm(formula = brozek ~ abdom + age:abdom + age:thigh + height:wrist, data = fat)
+
+
+#Verificamos el BIC 
+summary(BIC_lasso_comp)
+summary(best_lasso_comp2)
+summary(AjusteLasso_Interacciones)
+BIC(best_lasso_comp2)
+print(BIC(AjusteLasso_Interacciones))
+
+```
+
+
+```{r ModificacionFuncionLiga, include = FALSE}
+
+
+#Modificación: distribución Gamma con funciones liga logaritmo e identidad 
+#Primer Inciso
+#Método mejor subconjunto
+modelo_gamma_identidad <- glm(formula = brozek ~ height + abdom  + wrist,
+                              family = Gamma(link = "identity"), data = fat)
+
+modelo_gamma_logaritmo <- glm(formula = brozek ~ height + abdom  + wrist,
+                              family = Gamma(link = "log"), data = fat)
+
+#Método stepwise
+#Backward
+modelo_gamma_identidad2 <- glm(formula = brozek ~ weight + abdom + wrist, family = Gamma(link = "identity"), data = fat)
+
+modelo_gamma_logaritmo2 <- glm(formula = brozek ~ weight + abdom + wrist, family = Gamma(link = "log"), data = fat)
+
+
+#Forward
+modelo_gamma_identidad3 <- glm(formula = brozek ~ abdom + height + abdom + wrist, family = Gamma(link = "identity"), data = fat)
+
+modelo_gamma_logaritmo3 <- glm(formula = brozek ~ abdom + height + abdom + wrist, family = Gamma(link = "log"), data = fat)
+
+
+#Segundo inciso
+#Método Stepwise
+
+#Backward
+modelo_gamma_identidad4 <- glm(formula = brozek ~ hip + height:hip + neck:abdom + neck:hip, family = Gamma(link = "identity"), data = fat)
+
+modelo_gamma_logaritmo4 <- glm(formula = brozek ~ hip + height:hip + neck:abdom + neck:hip, family = Gamma(link = "log"), data = fat)
+
+
+#Forward 
+modelo_gamma_identidad5 <- glm(formula = brozek ~ abdom + height:wrist + chest:hip, family = Gamma(link = "identity"), data = fat)
+
+modelo_gamma_logaritmo5 <- glm(formula = brozek ~ abdom + height:wrist + chest:hip, family = Gamma(link = "log"), data = fat)
+
+
+#Lasso 
+modelo_gamma_identidad6 <- glm(formula = brozek ~ abdom + age:abdom + age:thigh + height:wrist, family = Gamma(link = "identity"), data = fat)
+
+modelo_gamma_logaritmo6 <- glm(formula = brozek ~ abdom + age:abdom + age:thigh  + height:wrist, family = Gamma(link = "log"), data = fat)
+
+
+#BIC's
+print(BIC(modelo_gamma_identidad))
+print(BIC(modelo_gamma_logaritmo))
+print(BIC(modelo_gamma_identidad2))
+print(BIC(modelo_gamma_logaritmo2))
+print(BIC(modelo_gamma_identidad3))
+print(BIC(modelo_gamma_logaritmo3))
+print(BIC(modelo_gamma_identidad4))
+print(BIC(modelo_gamma_logaritmo4))
+print(BIC(modelo_gamma_identidad5))
+print(BIC(modelo_gamma_logaritmo5))
+print(BIC(modelo_gamma_identidad6))
+print(BIC(modelo_gamma_logaritmo6))
+
+
+#Mejor modelo 
+Lista_bic_modelos_modificados <- c(BIC(modelo_gamma_identidad), BIC(modelo_gamma_logaritmo), BIC(modelo_gamma_identidad2), BIC(modelo_gamma_logaritmo2), BIC(modelo_gamma_identidad3), BIC(modelo_gamma_logaritmo3), BIC(modelo_gamma_identidad4), BIC(modelo_gamma_logaritmo4), BIC(modelo_gamma_identidad5), BIC(modelo_gamma_logaritmo5), BIC(modelo_gamma_identidad6), BIC(modelo_gamma_logaritmo6))
+
+
+Lista_modelos_modificados <- c(modelo_gamma_identidad, modelo_gamma_logaritmo, modelo_gamma_identidad2, modelo_gamma_logaritmo2, modelo_gamma_identidad3, modelo_gamma_logaritmo3, modelo_gamma_identidad4, modelo_gamma_logaritmo4, modelo_gamma_identidad5, modelo_gamma_logaritmo5, modelo_gamma_identidad6, modelo_gamma_logaritmo6)
+  
+indice_minimo <- which.min(Lista_bic_modelos_modificados)
+print(indice_minimo)
+menor_bic <- Lista_bic_modelos_modificados[[indice_minimo]]
+print(menor_bic)
+coef(modelo_gamma_logaritmo4)
+
+```
+
+```{r ModificacionCuadraticas, include = FALSE}
+
+#Método mejor subconjunto
+AjusteCuadratico_mejor_subconjunto <- lm(formula = brozek ~ height + I(height^2) + abdom + I(abdom^2) + wrist + I(wrist^2),
+                       data = fat)
+
+
+
+#Método stepwise
+#Forward
+AjusteCuadratico1 <- lm(formula = brozek ~ weight + I(weight^2) + abdom + I(abdom^2) + wrist + I(wrist^2),
+                       data = fat)
+
+
+
+#Backward
+AjusteCuadratico2 <- lm(formula = brozek ~ age + I(age^2) + abdom + I(abdom^2) + wrist + I(wrist^2),
+                       data = fat)
+
+#Lasso 
+AjusteCuadratico_Lasso <- lm(formula = brozek ~ age + I(age^2) + height + I(height^2) + abdom + I(abdom^2) + wrist + I(wrist^2), 
+                        data = fat)
+
+
+
+#Segundo inciso
+#Método Stepwise
+
+#Backward
+AjusteCuadraticoIdentidad4 <- glm(formula = brozek ~ weight + I(weight^2) + abdom + I(abdom^2) + wrist + I(wrist^2),
+                                 family = Gamma(link = "identity"), data = fat)
+
+AjusteCuadraticoLogaritmo4 <- glm(formula = brozek ~ weight + I(weight^2) + abdom + I(abdom^2) + wrist + I(wrist^2),
+                                 family = Gamma(link = "log"), data = fat)
+
+
+#Forward 
+AjusteCuadraticoIdentidad5 <- glm(formula = brozek ~ abdom + I(abdom^2) + height:wrist + I(height^2):I(wrist^2) + chest:hip + I(chest^2):I(hip^2),
+                                   family = Gamma(link = "identity"), data = fat)
+
+AjusteCuadraticoLogaritmo5 <- glm(formula = brozek ~ abdom + I(abdom^2) + height:wrist + I(height^2):wrist + chest:hip + I(chest^2):hip,
+                                   family = Gamma(link = "log"), data = fat)
+
+
+#Lasso 
+AjusteCuadraticoIdentidad6 <- glm(formula = brozek ~ abdom + I(abdom^2) + age:abdom + I(age^2):abdom + age:thigh + I(age^2):thigh + height:wrist + I(height^2):wrist,
+                                   family = Gamma(link = "identity"), data = fat)
+
+AjusteCuadraticoLogaritmo6 <- glm(formula = brozek ~ abdom + I(abdom^2) + age:abdom + I(age^2):abdom + age:thigh + I(age^2):thigh + height:wrist + I(height^2):wrist,
+                                   family = Gamma(link = "log"), data = fat)
+
+
+#BIC's
+print(BIC(AjusteCuadratico1))
+print(BIC(AjusteCuadratico2))
+print(BIC(AjusteCuadratico_Lasso))
+print(BIC(AjusteCuadraticoIdentidad4))
+print(BIC(AjusteCuadraticoLogaritmo4))
+print(BIC(AjusteCuadraticoIdentidad5))
+print(BIC(AjusteCuadraticoLogaritmo5))
+print(BIC(AjusteCuadraticoIdentidad6))
+print(BIC(AjusteCuadraticoLogaritmo6))
+
+#Mejor modelo 
+Lista_bic_modelos_variables_al_cuadrado <- c(BIC(AjusteCuadratico_mejor_subconjunto), BIC(AjusteCuadratico1), BIC(AjusteCuadratico2), BIC(AjusteCuadratico_Lasso), BIC(AjusteCuadraticoIdentidad4), BIC(AjusteCuadraticoLogaritmo4), BIC(AjusteCuadraticoIdentidad5), BIC(AjusteCuadraticoLogaritmo5), BIC(AjusteCuadraticoIdentidad6), BIC(AjusteCuadraticoLogaritmo6))
+
+
+Lista_modelos_variables_al_cuadrado <- c(AjusteCuadratico_mejor_subconjunto, AjusteCuadratico1, AjusteCuadratico2, AjusteCuadratico_Lasso, AjusteCuadraticoIdentidad4, AjusteCuadraticoLogaritmo4, AjusteCuadraticoIdentidad5, AjusteCuadraticoLogaritmo5, AjusteCuadraticoIdentidad6, AjusteCuadraticoLogaritmo6)
+  
+indice_minimo_mod_variables_al_cuadrado <- which.min(Lista_bic_modelos_variables_al_cuadrado)
+print(indice_minimo_mod_variables_al_cuadrado)
+menor_bic_cuadrado <- Lista_bic_modelos_variables_al_cuadrado[[indice_minimo_mod_variables_al_cuadrado]]
+print(menor_bic_cuadrado)
+coef(AjusteCuadratico_mejor_subconjunto)
+
+
+```
+
+
+\begin{table}[h]
+  \centering
+  \footnotesize
+  \begin{tabular}{|l|c|l|}
+    \hline
+    No. de modelo & Método de selección de variables & BIC \\
+    \hline
+    1 & Mejor subconjunto & 1412.142 \\
+    2 & Forward & 1446.202   \\
+    3 & Backward & 1455.516 \\
+    4 & Lasso simple & 1413.107  \\
+    5 & Forward con interacciones & 1416.311   \\
+    6 & Backward con interacciones & 1405.596   \\
+    7 & Lasso con interacciones & 1411.985   \\
+    8 & Backward, distribución Gamma, liga logarítmica & 1490.06  \\
+    9 & Mejor subconjunto, variables al cuadrado & 1423.089  \\
+    \hline
+  \end{tabular}
+  \caption{Resultados de los métodos de selección}
+  \label{tabla:resultados}
+\end{table}
+
+\begin{table}[h]
+    \centering
+    \small
+    \begin{tabular}{|c|c|}
+        \hline
+        \textbf{No. de modelo} & \textbf{Forma matemática del modelo} \\
+        \hline
+        1 & $\hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{height} + \beta_{2} \cdot \text{abdom} + \beta_{3} \cdot \text{wrist}$ \\
+        \hline
+        2 & $\hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{weight} + \beta_{2} \cdot \text{abdom} + \beta_{3} \cdot \text{wrist} $ \\
+        \hline
+        3 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{weight} + \beta_{2} \cdot \text{abdom} + \beta_{3} \cdot \text{wrist} $ \\
+        \hline
+        4 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{age} + \beta_{2} \cdot \text{height} + \beta_{3} \cdot \text{abdom} + \beta_{4} \cdot \text{wrist} $ \\
+        \hline
+        5 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{hip} + \beta_{2} \cdot \text{height:hip} + \beta_{3} \cdot \text{neck:abdom} + \beta_{4} \cdot \text{neck:hip} $ \\
+        \hline
+        6 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{abdom} + \beta_{2} \cdot \text{height:wrist} + \beta_{3} \cdot \text{chest:hip}$  \\
+        \hline
+        7 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{abdom} + \beta_{2} \cdot \text{age:abdom} + \beta_{3} \cdot \text{age:thigh} + \beta_{4} \cdot \text{height:wrist} $ \\
+        \hline
+        8 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{hip} + \beta_{2} \cdot \text{height:hip} + \beta_{3} \cdot \text{neck:abdom} + \beta_{4} \cdot \text{neck:hip} $ \\
+        \hline
+        9 & $ \hat{E(\text{brozek})} = \beta_{0} + \beta_{1} \cdot \text{height} + \beta_{2} \cdot \text{height²} + \beta_{3} \cdot \text{abdom} + \beta_{4} \cdot \text{abdom²} + \beta_{5} \cdot \text{wrist} + \beta_{6} \cdot \text{wrist²}$ \\
+        \hline
+    \end{tabular}
+    \caption{Tabla con número de modelo y forma matemática.}
+    \label{tabla:modelos}
+\end{table}
+
+
+
+\newpage
+
+
+En el \textbf{Cuadro 1} se muestran los modelos obtenidos mediante diferentes métodos de selección de variables. En el \textbf{Cuadro 2} se muestran las variables que fueron seleccionadas para cada modelo.
+Primero nos enfocaremos en los primeros siete modelos de la tabla, es decir los modelos sin modificaciones y después discutiremos los dos modelos con modificaciones.
+
+  De acuerdo a los modelos que se observan en la tabla, la variable que más veces aparece es \textit{abdom}, la cual aparece un total de 6 veces, sin contar aquellas veces en las que aparece interactuando con otra variable, seguida de la variable \textit{wrist}, la cual aparece 4 veces, sin contar interacciones. Además los coeficientes asociados a la variable abdom son positivos en los primeros cuatro modelos por lo que podemos afirmar que la variable más significativa asociada a un incremento del valor promedio de la grasa corporal en los hombres es la medida del abdomen \textsuperscript{\textbf{[2]}}. En cambio, en los primeros cuatro modelos de la tabla que incluyen a la variable wrist los coeficientes asociados a la variable wrist son negativos en los modelos en que esta variable aparece y por lo tanto es posible inferir que a medida que la medición de la muñeca aumenta entonces habrá una disminución del valor promedio de la grasa corporal en hombres \textsuperscript{\textbf{[3]}}. En conclusión las variables clínicas más significativas para modelar el promedio de la grasa corporal en los hombres son la medida del abdomen y de la muñeca. Las variables que no aparecen entre las seleccionadas y que podemos observar en la forma matemática de los modelos que se encuentran en el Cuadro 2 son: adipos, knee, ankle, biceps, forearm. Por lo tanto ninguna de las variables anteriormente mencionadas tiene algún efecto sobre el valor promedio del porcentaje de grasa en hombres.
+
+Además, según el criterio BIC, se observa que al considerar modelos que toman en cuenta las interacciones entre las variables, el BIC de los modelos con interacciones disminuye. Esto indica que, al incorporar interacciones, el modelo del promedio de porcentaje de grasa corporal en hombres se ajusta mejor a los datos.
+
+Se realizaron modificaciones a los modelos hasta entonces obtenidos. Una modificación consistió en cambiar la distribución de la variable respuesta y considerar una función liga logarítmica, la otra modificación consistió en incluir las variables al cuadrado. Se tomaron los mejores modelos de cada modificación de acuerdo al criterio BIC. \textsuperscript{\textbf{[4]}}
+Para el modelo ajustado cuyas variables se obtuvieron mediante el método Backward y fueron modificados mediante la distribución Gamma con liga logarítmica, no se observa una mejora en comparación con los demás modelos, ya que su puntuación de acuerdo al criterio BIC aumentó. Siguiendo la misma lógica, en el caso del modelo cuyas variables se obtuvieron mediante el método de Mejor subconjunto y se modifico al incluir las variables al cuadrado, solo representa una mejora frente a los modelos con variables seleccionadas mediante Forward y Backward.
+
+Por otra parte, de los modelos observados en el \textbf{Cuadro 1} se puede ver que aquel que tiene un menor valor BIC es el modelo cuya selección de variables se realizó con el método stepwise conocido como \textit{Backward} incluyendo interacciones. Los coeficientes de esto modelo pueden ser interpretados de la siguiente manera: Un aumento del 100% de la variable \textit{hip} se asocia a un aumento del 114 \% en el promedio de la grasa corporal de los hombres dejando al resto de variables fijas, a su vez las variables asociadas a la altura y a la medida del cuello (\textit{height} y \textit{neck}) interactuan con la variable \textit{hip}, que representa la medida de la cadera, el valor del coeficiente asociado es negativo, en particular, un aumento de una unidad para la variable asociada a la interacción \textit{hip:height} se asocia a una disminución del 0.4 \%  del promedio de la grasa corporal en hombres y un aumento en una unidad a la variable asociada a la interacción \textit{hip:neck} está asociada a una disminución del 2 \%  para el promedio de la grasa corporal en hombres, por otro lado la interacción \textit{neck:abdom} está asociada a un aumento del 2\% en el promedio de la grasa corporal para hombres. \textsuperscript{\textbf{[5]}}.
+
+En este caso se puede observar que los decrementos causados por las interacciones \textit{hip:height} y \textit{hip:neck} así los aumentos asociados a \textit{neck:abdom} son de una magnitud muy pequeña como para que las variables sean consideradas estadísticamente relevantes. Sin embargo, dentro del modelo elegido, el aumento causado por la variable hip supera el 100% y por tanto se considera a la medida de la cadera como una variable significativa. En consecuencia, esto indica que la medida de la cadera está asociada postivamente a un aumento del promedio de porcentaje de grasa corporal en los hombres.
+
+\newpage
+\textbf{Referencias a los chunks}
+\begin{itemize}
+\item \textbf{[1]} El preprocesamiento de los datos se puede consultar en los chunks de código \textit{Preprocesamiento} y \textit{RemocionCasosExtraños} que se encuentran en las líneas 56 y 98 del archivo RMarkdown.
+\item \textbf{[2]}. Los valores estimados del coeficiente asociado a la variable abdom para los 6 modelos en los que aparece la variable se pueden consultar en los summarys de los modelos ajustados dentro de los chunks de código: \textit{MejorSubconjunto, Forward, Backward, Lasso, backwardInteracciones y LassoConInteracciones} en las líneas 188, 221, 250, 325, 354 y 384 respectivamente.
+\item \textbf{[3]}. Los valores estimados del coeficiente asociado a la variable wrist para los 4 modelos en los que aparece la variable \textit{wrist} por si sola se pueden consultar en los summarys de los modelos ajustados dentro de los chunks de código: \textit{MejorSubconjunto, Forward, Backward, Lasso} en las líneas 188, 221, 250, y 325  respectivamente.
+\item \textbf{[4]}. Los chuncks de las modificaciones son \textit{Modificacionfuncionliga} y \textit{ModificacionCuadratica} y se pueden consultar en las líneas 438 y 513 del archivo RMarkdown.
+\item \textbf{[5]}. Los valores estimados de los coeficientes asociados a las variables hip,  hip:height, hip:neck y neck:abdom se pueden consultar en el summary del modelo ajustado dentro del chunk de código \textit{backwardInteracciones} en la línea de código 354 del archivo RMarkdown..
+\end{itemize}
+

@@ -1,0 +1,391 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+geometry: margin=1.0cm
+header-includes:
+   - \usepackage[spanish]{babel}
+   - \usepackage[utf8]{inputenc}
+   - \decimalpoint
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+#Empezamos limpiando el espacio de trabajo 
+rm(list = ls(all.names = TRUE))
+
+#Elegimos nuestra carpeta
+setwd("C:/Users/tutor/Documents/Seminario Aprendizaje Estadístico Automatizado/Mi clase Semestre 2024-1/Tarea Examen 2")
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(5.9, 4.9),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+
+
+
+# Librerías
+library(dplyr)      
+library(ggplot2)    
+library(kableExtra) 
+library(GGally)     
+library(multcomp)   
+library(car)        
+library(broom)
+library(DHARMa) 
+library(ggResidpanel)
+library(data.table)
+library(kableExtra)
+library(factoextra)
+library(NbClust)
+library(psych)
+library(gridExtra)
+```
+
+\section{4. Identificación de grupos de clientes para focalizar la publicidad de la empresa Oddjob Airways con conglomerados}\label{problema2}
+
+### Identificación de grupos usando el método Kmeans
+```{r LeerDatos2, include=F}
+datos <- na.omit(read.csv("Dat4ExA.csv")[,-1])
+```
+
+Asumimos que nuestras variables siguen un comportamiento continuo y obtuvimos algunos grupos convenientes para una mejor interpretación de los datos mediante el método k-means:
+
+```{r summary, include=F}
+summary(datos)
+```
+
+```{r kmeans, echo=F}
+# La función kmeans
+set.seed(2)
+# K-means, K = 3 y 20 asignaciones aleatorias de clústeres iniciales 
+# Aquí x corresponde a los datos que ya deben estar 
+# preprocesados para mejores resultados
+k.means <- kmeans(x = datos, centers = 3, nstart = 20)
+
+# La asignación a un cluster se puede obtener con $cluster
+table(k.means$cluster)
+```
+Al leer las preguntas que se le hicieron a los clientes potenciales, pudimos notar 4 aspectos del servicio de la compañía: puntualidad, seguridad, mantenimiento e instalaciones, y calidad de servicios ofrecidos. Nosotros creemos que los temas de mantenimiento e instalaciones conllevan a la seguridad del cliente, por lo que dedujimos que la publicidad se puede focalizar en 3 grupos de clientes: los que esperan puntualidad y seguridad, los que esperan seguridad y los que esperan calidad de servicio, puntualidad y seguridad.
+
+Por lo que, procedimos a diseñar modelos, quedándonos con uno para clasificar a los clientes en tres categorías principales en función de sus expetativas.
+
+
+```{r silhouette, echo=F, include=FALSE}
+set.seed(2)
+figS=fviz_nbclust(datos, FUNcluster = kmeans, method = c("silhouette"), k.max = 8, nstart = 20)
+figS
+figS$data
+```
+
+```{r clusters, echo=F, include=FALSE}
+#Hacemos una función para facilitar el cambio de k e incluyamos el método silhouette. De acuerdo a silhouette, posteriormente haremos pruebas con los 3 mejores valores de k (2,3 y 4), probando tanto con los datos sin alteraciones como con los datos estandarizados. Esta función por default tomará a k con el valor más óptimo que nos arroja el método silhouette, más adelante daremos la instrucción para usar otros valores de k.
+
+dataKmeans <- datos
+
+kmeans_analysis <- function(x, max.nc = 7, k = 0, seed = 1, plot = F) {
+    if (k == 0) {
+      set.seed(seed)
+      if (plot)
+        plot(fviz_nbclust(x, FUNcluster = kmeans, method = c("silhouette"), k.max = max.nc, nstart = 20))
+      k <- NbClust(x, max.nc = max.nc, method = "kmeans", index = "silhouette")$Best.nc[[1]]
+    }
+  
+  kmeans <- kmeans(x, k, nstart = 25)
+  return(factor(kmeans$cluster))
+}
+
+dataKmeans$k <- kmeans_analysis(datos)
+```
+
+
+```{r Grafica41, echo=F, message=F, include = F, fig.cap="Kmedias con 2 Categorías: Buena y Mala expectativa del servicio"}
+#Comenzaremos a ver el comportamiento por categoría de cada uno de los clusters para la base en su escala original.
+
+ggpairs(dataKmeans, title= "Kmedias con 2 Grupos", aes(colour = k))
+
+#Notemos que, para todas las preguntas de la encuesta, el grupo 1 tiene una mayor concentración de los datos en comparación con el segundo grupo, es decir, en promedio, el grupo 1 tiene mayores expectativas de los servicios de Oddjob Airways y el del grupo 2 tiene medias o en general bajas expectativas. 
+```
+
+```{r kmeans 3 categorías, include=F}
+# Vamos a intentar hacer 3 grupos.
+
+dataKmeans$k <- kmeans_analysis(datos, k = 3)
+describeBy(dataKmeans ~ k,mat=TRUE)
+
+datosc3 <- dataKmeans
+```
+
+```{r Grafica412, echo=F, message=F, fig.dim = c(5.5, 4.3),fig.cap="Kmedias con 3 Categorías: Personas a las que les importa la puntualidad y la seguridad, Personas a las que les importa viajar seguras solamente, y Personas a las que les importa la calidad de los servicios, la puntualidad y la seguridad"}
+ggpairs(datosc3, title="Kmedias con Tres Grupos", aes(colour = k)) 
+```
+En la Figura \@ref(fig:Grafica412) podemos ver cómo los mayores promedios de expectativas se los lleva el grupo 3, siguiéndole el grupo 1 y finalmente el grupo 2.
+
+```{r kmeans 4 categorías, include=F}
+#De igual forma revisamos con 4 clusters
+
+dataKmeans$k <- kmeans_analysis(datos, k = 4)
+describeBy(dataKmeans ~ k,mat=TRUE)
+```
+
+```{r 4 categorías, include=F}
+ggpairs(dataKmeans, title="Kmedias con Cuatro Grupos", aes(colour = k))
+```
+
+```{r estandarizado dos grupos, message=F, echo=F, include=F}
+dataKmeans$k <- kmeans_analysis(as.data.frame(scale(datos))) 
+ggpairs(dataKmeans, title="Datos Estandarizados con Dos Grupos", aes(colour = k))
+```
+
+```{r estandarizado tres grupos, message=F, echo=F, include=F}
+dataKmeans$k <- kmeans_analysis(as.data.frame(scale(datos)), k = 3)
+ggpairs(dataKmeans, title="Datos Estandarizados con Tres Grupos", aes(colour = k))
+```
+
+```{r estandarizado cuatro grupos, message=F, echo=F, include=F}
+dataKmeans$k <- kmeans_analysis(as.data.frame(scale(datos)), k = 4)
+ggpairs(dataKmeans, title="Datos Estandarizados con Cuatro Grupos", aes(colour = k))
+```
+
+En la Figura \@ref(fig:Grafica42) tenemos a la primera y segunda componente principal, las cuales tienen una proporción de la varianza de 59.1% y 9.7% respectivamente, lo cual nos dice que la proporción de la varianza de las demás componentes está por debajo de este último porcentaje. Esta primera componente actúa como un resumen de todas las demás. Es decir, a mayor puntuación en este componente, entonces mayor promedio en general en todas las respuestas del cuestionario.
+
+```{r Grafica42, echo=F, message=F, fig.dim = c(3.8, 2.7), fig.cap="Variables-PCA"}
+# Procedemos a obtener los componentes principales de los datos sin estandarizar para llegar a una conclusión y ver cuántos cluster elegir
+R.CP <- prcomp(datos, scale = T)
+fviz_pca_var(R.CP,
+             col.var = "contrib") # axes=c(2,3)
+
+#Podemos ver en la siguiente gráfica que la primer componente principal, aunque no tiene tanta varianza explicada como quizás nos gustaría, sí tiene muchísima más varianza explicada en proporción con las demás.
+
+```
+```{r Grafica43, echo=F, message=F, fig.dim = c(4.8, 3.8), fig.cap="Distribución de datos sin estandarizar"}
+
+par(mfrow = c(2,2)) #define cantidad renglones y columnas
+par(mar = c(4, 5, 3, 1))
+dataKmeans$k <- kmeans_analysis(datos)
+
+plot1<- fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataKmeans$k, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Kmedias con 2 Categorías")
+
+dataKmeans$k <- kmeans_analysis(datos, k=3)
+
+plot2<- fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataKmeans$k, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Kmedias con 3 Categorías")
+
+dataKmeans$k <- kmeans_analysis(datos, k=4)
+
+plot3<- fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataKmeans$k, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Kmedias con 4 Categorías")
+grid.arrange(plot1,plot2,plot3, ncol=2)
+
+#En la Figura \@ref(fig:Grafica43), primer gráfica, vemos que a la derecha se encuentran los clientes potenciales con buenas expectativas en general en todas las preguntas del cuestionario, mientras que a la izquierda los de regular y mala, según la primera componente principal.
+
+# De acuerdo al método silhouette, éste nos sugirió tomar dos grupos, pero por interpretación es recomendable usar más de 2. Ahora, podemos ver que no diferencia mucho la interpretación de quedarnos con 3 grupos o con 4, pues cuando agrupamos en 4 la concentración de personas en el grupo 3 es muy pequeña. Además, tener 3 cluster está mejor calificado por silhouette, por lo que estamos tentados a elegir 3 grupos
+
+# Como habiamos mencionado antes, lo que se ve en la gráfica anterior es que,a mayor valor en el componente principal 1, entonces observamos más valor en expectativas de los clientes potenciales en todas las preguntas y/o variables. 
+
+## Podemos observar que las variables "e1" y "e4" que hacen referencia a la puntualidad se encuentran en el cuadrante 4. A mayor valor en las expectativas de puntualidad, entonces mayor valor en la componente 1 y menor (negativos) en la componente 2.
+
+# Para el caso de variables como lo son la "e9" y "e11", las cuales hacen referencia a la seguridad y mantenimiento, vemos que están más correlacionadas a la componente 1, es decir, a mayor valor en la componente principal 1, entonces mejores expectativas de los clientes potenciales a la seguridad y mantenimiento.
+
+#y para las variables "e22" y "e15" que hacen referencia a la calidad del servicio, notemos que se encuentran en el cuadrante 1. A mayor valor en las expectativas de estas variables, entonces mayor valor en la componente 2.
+
+# De lo anterior y observando la segunda gráfica de la siguiente figura, nos inclinamos a decir que el grupo 1 trata de puntualidad y seguridad, el grupo 2 de seguridad y el grupo 3 de calidad de servicio, puntualidad y seguridad.
+
+
+```
+Observemos en la Figura \@ref(fig:Grafica43) que, en la primer gráfica podemos dividir a los clientes entre los que tienen altas expectativas en todos los aspectos y los que no, lo cual no nos ayuda a focalizar la publicidad. La tercer gráfica nos ayuda más, pero en el chunk "silhouette", nos guíamos del método con el mismo nombre para afirmar que tener 3 grupos es mejor que tener 4, lo cual también se puede ver en la segunda gráfica. Debido a esto, y observando los componentes principales, podemos decir que es mejor, y hace la diferencia, focalizar la publicidad en 3 grupos de clientes: los que esperan puntualidad y seguridad, los que esperan seguridad y los que esperan calidad de servicio, puntualidad y seguridad, ordenados respectivamente como se ve en la segunda gráfica de la Figura \@ref(fig:Grafica43).
+
+### Identificación de grupos usando el método Jerárquico Aglomerativo
+De la misma manera, asumiendo que nuestras variables siguen un comportamiento continuo, hicimos la prueba con el método aglomerativo jerárquico. Para éste también probamos tanto con los datos sin alteraciones como con los datos estandarizados. Hicimos la prueba con todas las combinaciones de disimilaridades entre: euclidea, máxima, canberra, manhattan y minkowski, para los clientes. Y las disimilaridades probadas para los clusters fueron: ward D, ward D2, simple y completa.
+
+No tuvimos éxito con la disimilaridad simple y completa. Para todas las demás combinaciones de disimilaridades en general no se tuvo un mal desempeño de los modelos.
+
+```{r aglomerativo jerárquico, include=F}
+# De igual forma, hacemos una función para el método jerárquico
+dataH <- datos
+distances <- c("euclidian", "maximum", "canberra", "manhattan", "minkowski")
+clustDistances <- c("ward.D", "ward.D2", "single", "complete")
+
+hclust_analysis <- function(datos, distance, clustDist) {
+  for (s1 in distance) {
+    dis <- dist(datos, method = s1)
+    for (s2 in clustDist) {
+      jer <- hclust(dis, method = s2)
+      plot(jer, main = paste(s1, s2))
+    }
+  }
+}
+
+hclust_analysis(datos, distances, clustDistances)
+hclust_analysis(as.data.frame(scale(datos)), distances, clustDistances)
+```
+
+Pudimos diseñar un modelo que nos pudiera separar los datos en tres grupos de una manera satisfatoria. Usando clusters jerárquicos aglomerativos, el modelo que consideramos como el mejor para dos clusters es usando la disimilaridad de Manhattan entre clientes y ward D2 para clusters. El modelo fue muy parecido al de kmedias y se puede visualizar en las Figuras \@ref(fig:Grafica46) y \@ref(fig:Grafica44), siendo la segunda gráfica de esta última.
+
+```{r Modelos, echo=F, message=F}
+hEucD <- hclust(dist(datos), method = "ward.D")
+hEucD2 <- hclust(dist(datos), method = "ward.D2")
+hMaxD <- hclust(dist(datos, method = "maximum"), method = "ward.D")
+hMaxD2 <- hclust(dist(datos, method = "maximum"), method = "ward.D2")
+hCanD <- hclust(dist(datos, method = "canberra"), method = "ward.D")
+hCanD2 <- hclust(dist(datos, method = "canberra"), method = "ward.D2")
+hManD <- hclust(dist(datos, method = "manhattan"), method = "ward.D")
+hManD2 <- hclust(dist(datos, method = "manhattan"), method = "ward.D2")
+hMinD <- hclust(dist(datos, method = "minkowski"), method = "ward.D")
+hMinD2 <- hclust(dist(datos, method = "minkowski"), method = "ward.D2")
+```
+
+```{r Grafica44, echo=F, message=F, fig.dim = c(4.8, 3.8), fig.cap="Distribución de los datos: Método Jerárquico usando Manhattan-Ward D2"}
+dataH$c <- factor(cutree(hManD2, k = 2)) # cambiando el valor de k y el cluster graficamos las distintas opciones
+dataHc2 <- dataH
+plot11 <-fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataH$c, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Método Jerárquico con Dos Grupos, Manhattan-Ward D2")
+
+dataH$c <- factor(cutree(hManD2, k = 3)) # cambiando el valor de k y el cluster graficamos las distintas opciones
+dataHc3 <- dataH
+plot12 <-fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataH$c, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Método Jerárquico con Tres Grupos, Manhattan-Ward D2")
+
+dataH$c <- factor(cutree(hManD2, k = 4)) # cambiando el valor de k y el cluster graficamos las distintas opciones
+dataHc4 <- dataH
+plot13 <-fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataH$c, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Método Jerárquico con Cuatro Grupos, Manhattan-Ward D2")
+
+grid.arrange(plot11,plot12,plot13, ncol=2)
+```
+```{r Grafica45, echo=F, message=F, include=FALSE, fig.dim = c(6, 5), fig.cap="Método Jerárquico con Dos Grupos, Manhattan-Ward D2"}
+ggpairs(dataHc2, title="Método Jerárquico con Dos Grupos, Manhattan-Ward D2", aes(colour = c))
+```
+
+```{r Grafica46, echo=F, message=F, fig.dim = c(5.5, 4.1), fig.cap="Método Jerárquico con Tres Grupos, Manhattan-Ward D2"}
+ggpairs(dataHc3, title="Método Jerárquico con Tres Grupos, Manhattan-Ward D2", aes(colour = c))
+```
+En la Figura \@ref(fig:Grafica44) podemos ver nuevamente la comparación de la distribución de 2, 3 y 4 grupos. Notamos que la gráfica que tiene 3 grupos es muy similar a la obtenida con el método Kmeans. En esta ocasión los 3 grupos de clientes son: los que esperan puntualidad y seguridad, los que esperan calidad de servicio, puntualidad y seguridad, y los que esperan seguridad solamente, respectivamente ordenados como se ve en la gráfica. De igual forma, vemos un cambio relevante, y es que los promedios de expectativas de los clientes sobre seguridad solamente ya están más cerca de los promedios de expectativas de los clientes sobre puntualidad y seguridad, siendo más relevantes los promedios de esperar todo en los servicios.
+
+```{r Grafica47, echo=F, message=F, include=FALSE, fig.dim = c(6, 5), fig.cap="Método Jerárquico con Cuatro Grupos, Manhattan-Ward D2"}
+ggpairs(dataHc4, title="Método Jerárquico con Cuatro Grupos, Manhattan-Ward D2", aes(colour = c))
+
+# Es evidente que es mejor usar tres grupos al usar este método, pues el grupo 4 tiene muy poca concentración de personas que podrían entrar en otro grupo en el que pueda coincidir. En el cluster anterior, podemos ver que al grupo que podría entrar el grupo 4 es en el grupo 3.
+
+# De la misma forma que con el método kmeans, podemos observar, en la segunda gráfica de la figura del chunk "Grafica44", que el grupo 1 trata de puntualidad y seguridad, el grupo 2 de seguridad y el grupo 3 de calidad de servicio, puntualidad y seguridad.
+```
+
+### Identificación de grupos usando ambos métodos con Componentes Principales
+
+```{r Datos CP, include=F}
+#Probamos a repetir los pasos anteriores pero ahora haciendo uso de los componentes principales. Tomamos los primeros 4, que acumulaban el 80% de la varianza explicada.
+summary(R.CP) # 4 acumulan casi 80%
+dataPC <- as.data.frame(R.CP$x[,1:4])
+```
+Probando en kmedias con las componentes principales, comenzamos con tres clusters y consideramos que la separación es más limpia y fue mejor a la anterior.
+
+```{r kmeans CP, message=F, echo=F, include=FALSE}
+dataPCK <- dataPC
+dataPCK$k <- kmeans_analysis(dataPC, k=3)
+dataPCK$k <- factor(dataPCK$k, levels = c("1", "2","3"), labels = c("3","2", "1"))
+dataPCK3<- dataPCK
+#Probamos nuevamente a intentar separar en cuatro clusters ahora con las componentes principales y tuvimos un mejor resultado que con los aglomeramientos jerárquicos como se puede ver en las siguientes gráficas
+dataPCK$k <- kmeans_analysis(dataPC, k=4)
+dataPCK$k <- factor(dataPCK$k, levels = c("1", "2","3","4"), labels = c("4","3","2", "1"))
+dataPCK4<- dataPCK
+```
+
+```{r Gráfica 48, message=F, echo=F, include=FALSE, fig.dim = c(6, 5), fig.cap="Método Kmeans usando Componentes Principales, con 3 y 4 grupos"}
+ggpairs(dataPCK3, title="Kmedias CP, Tres Grupos", aes(colour = k))
+
+plot22<-fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataPCK3$k, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="kmedias CP, Tres Grupos")
+
+ggpairs(dataPCK4, title="Kmedias CP, Cuatro Grupos", aes(colour = k))
+
+plot24<-fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataPCK4$k, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="kmedias CP, Cuatro Grupos")
+
+grid.arrange(plot22,plot24, ncol=2)
+
+
+```
+```{r pesos, echo=F, include=FALSE}
+# La separación de este modelo podríamos decir que es más limpia que la de kmedias con k=3. 
+
+# Para k = 4, Las medias de la primera componente principal están mejor diferenciadas y le separación de grupos es más clara visualizando las muestras en componentes principales. Sin embargo hay unas observaciones verdes del grupo 3 que pensaríamos que sería mejor que fueran azules, es decir que fueran del grupo 2. Esto nos sugiere que se pueden interpretar mejor 3 grupos.
+
+#Mostramos los pesos de la componente a continuación:
+R.CP$rotation[,1] # Cargas de la primera CP
+```
+
+Finalmente probamos con los datos de las componentes principales para hacer clusters jerárquicos. Usamos todas las mismas disimilaridades que en el caso anterior.
+
+```{r jerárquicos CP, include=F}
+dataPCH <- dataPC
+
+hclust_analysis(dataPCH, distances, clustDistances)
+```
+
+Los mejores modelos para tres clusters fueron usando ward D2 entre clusters y euclidea o minkowski para clientes. Mostramos a continuación la euclidea:
+
+```{r Modelos CP, message=F, echo=F, include=FALSE}
+hEucD <- hclust(dist(dataPC), method = "ward.D")
+hEucD2 <- hclust(dist(dataPC), method = "ward.D2")
+hMaxD <- hclust(dist(dataPC, method = "maximum"), method = "ward.D")
+hMaxD2 <- hclust(dist(dataPC, method = "maximum"), method = "ward.D2")
+hCanD <- hclust(dist(dataPC, method = "canberra"), method = "ward.D")
+hCanD2 <- hclust(dist(dataPC, method = "canberra"), method = "ward.D2")
+hManD <- hclust(dist(dataPC, method = "manhattan"), method = "ward.D")
+hManD2 <- hclust(dist(dataPC, method = "manhattan"), method = "ward.D2")
+hMinD <- hclust(dist(dataPC, method = "minkowski"), method = "ward.D")
+hMinD2 <- hclust(dist(dataPC, method = "minkowski"), method = "ward.D2")
+
+dataPCH$c <- factor(cutree(hEucD2, 3))
+plot3<-fviz_pca_ind(R.CP, geom.ind = "point", 
+             col.ind = dataPCH$c, 
+             axes = c(1, 2), 
+             pointsize = 1.5,
+             submain="Jerárquico CP, Tres Grupos, Euclidea-Ward D2")
+plot3
+ggpairs(dataPCH, title="Jerárquico CP, Tres Grupos, Euclidea-Ward D2", aes(colour = c))
+
+# Notamos que, en comparación con la de kmedias CP con 3 clusters es muy parecida. Vemos que la visualización de las muestras en CP se ve menos limpia por el corte entre grupos. Sin embargo, la separación de las medias en la primera componente principal es la deseada y en la segunda componente, aunque es menos relevante, también es más adecuada la separación. Es decir, en general el grupo 1 tiene un promedio más alto en todas sus respuestas, el grupo 2 un promedio medio y el tercer grupo un promedio de respuestas más bajo que el resto.
+```
+```{r Gráfica 49, message=F, echo=F, include=T, fig.dim = c(5, 2), fig.cap="Métodos Kmeans y Jerárquico usando Componentes Principales, con 3 Categorías"}
+grid.arrange(plot22,plot3, ncol=2)
+```
+
+### Conclusiones Finales
+
+Finalmente, para tres grupos elegimos el último modelo visto, usando las componentes principales y aglomeramientos jerárquicos con métrica euclidea entre clientes y ward D2 entre clusters. Esto debido a que la separación de las medias en la primera componente principal es la deseada y en la segunda componente, aunque es menos relevante, también es más adecuada la separación. Es decir, en general el grupo 1 tiene un promedio más alto en todas sus respuestas, el grupo 2 un promedio medio y el tercer grupo un promedio de respuestas más bajo que el resto.
+
+La elección de estos modelos dependerá de la publicidad que se quiera usar. Creemos que tiene más sentido enviar tres tipos diferentes de publicidad que cuatro o dos, ya que podríamos dar las mayores ofertas a los de bajas expectativas, como lo son las clientes que sólo buscan seguridad en sus vuelos, enviar más publicidad a los de medias expectativas, como lo son las clientes que buscan seguridad y puntualidad en sus viajes, y a los de altas expectativas, como lo son los clientes que esperan lo mejor en sus vuelos, es decir, la calidad, seguridad y puntualidad, seguir tratándolos con excelencia para seguir con su preferencia al elegir viajar en Oddjob Airways.

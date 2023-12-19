@@ -1,0 +1,223 @@
+---
+output:
+  pdf_document:
+    toc: no
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+table.placement: !ht
+geometry: margin=1.0cm
+header-includes:
+- \usepackage[spanish]{babel}
+- \usepackage[utf8]{inputenc}
+- \decimalpoint
+- \usepackage{float}
+urlcolor: blue
+---
+# Reducción de dimensionalidad para test de personalidad. 
+
+Se realizó un preprocesamiento donde se filtraton las variables de nuestro interés y se exploraron dimensiones interesantes con los datos de manera continua y ordinal, se trabajó datos con y sin escalar. Adicional se renombraron las variables para fines practicos y de interpretación.
+
+```{r setup, include=FALSE}
+#Limpieza
+rm(list = ls(all.names = TRUE)) #ambiente
+gc()  #memoria
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+```
+
+```{r datos3, include=FALSE}
+setwd("~/Seminario Estadistica/Tarea/")
+
+datos3  <- read.csv("Dat3Ex.csv") #Continuas sin escalar 
+datos3 <- datos3[,c("V1", "V2", "V3", "V6", "V8", "V12","V13","V16","V17","V26","V27","V28","V31","V33","V37")]
+names(datos3)=c("Parlanchin", "Victimista", "Exhaustivo", "Reservado", "Descuidado",  "Peleonero", "Confiable", 
+                "Entusiasta",  "Indulgente", "Asertivo", "Frio", "Perseverante", "Timido", "Eficiente", "Rudo")
+
+#colSums(is.na(datos3))#No trae NA :p 
+
+#library(GGally)
+#X11()
+#ggpairs(datos3)   #Checamos el ggpairs para ver si es necesario escalar, pero como igual probraremos ambas lo dejamos comentado  
+```
+Con ayuda de la librería factoextra se obtuvieron los $Componentes\hspace{.2cm}Principales$, procemos a usar la función fviz_eig como un índice para el número a considerar de estas y en \@ref(fig:Grafica13) se muestran los resultados, para los datos con o sin escalar se suguiere entre 4 o 5 componentes  pues después de estos ya no hay mucho cambio en la varianza que aportan. Además se acumula en los tres casos un aproximado de 60% de varianza total cuando consideramos 4 componentes. Más detalles en Chunk factoCP.
+
+```{r factoCP, include=FALSE}
+library(factoextra)
+R.CP_org=prcomp(datos3,  scale = FALSE)  #obtenemos las componentes principales 
+R.CP_est=prcomp(datos3, scale = TRUE)
+R.CP_log=prcomp(log10(datos3), scale = FALSE)
+
+#Nos apoyamos con la varianza que recuperamos para decidir 
+print(summary(R.CP_org), digits=3) #en 4 se acumulan 61% y en 5 66%
+print(summary(R.CP_est), digits=3) #en 4 se acumula 60% y en 5 66%
+print(summary(R.CP_log), digits=3) #en 4 se acumula 63% y en 5 69%
+```
+
+```{r Grafica13, fig.dim=c(7.0, 3.7),	fig.align = "center" ,fig.cap= "Índices para número de componentes principales", include=TRUE}
+library(gridExtra)
+plot_org <- fviz_eig(R.CP_org, main = "Sin escalar")
+plot_est <- fviz_eig(R.CP_est, main = "Estandarizados")
+plot_log <- fviz_eig(R.CP_log, main = "Logaritmica")
+grid.arrange(plot_org, plot_est, plot_log, ncol = 3)
+```
+
+```{r Cor, include=FALSE}
+#Ahora para interpretar, hay que sacar correlaciones entre comp principles
+#y las variables originales 
+#A mayor/menor valor en el comp pricipal hay mas "variables" 
+options(digits=2)
+cor(cbind(R.CP_org$x[,1:4],(datos3)))  
+cor(cbind(R.CP_est$x[,1:4], (scale(datos3))))
+cor(cbind(R.CP_log$x[,1:4], (log(datos3))))
+```
+Tras revisar las correlaciones con las variables originales podemos darnos una idea mejor de las dimensiones que encontramos, son muy similares salvo algunas variables pero en escencia podemos considerar 4 tipos de personalidades que se derivan de lo siguiente: 
+
+
+$1.-$ Para los datos sin escalar, las variables Victimista, Peleonero, Frio, Rudo y Entuciasta son las que más pesan en el componente 1, las variables Parlanchin, Reservado, Asertivo y Tímido son las de mayor peso para el componente 2, mientras que para el componente 3 las de mayor peso son Exhaustivo, Perseverante y Eficiente, para el componente 4 las de mayor peso son Descuidado e Indulgente. 
+
+$2.-$ Para los datos estandarizados, las variables Victimista, Exhaustivo, Peleonero, Confiable, Entusiasta, Frío, Eficiente y Rudo son las de mayor peso en el componente 1, las variables Parlanchín, Reservado, Asertivo y Tímido son las de mayor peso, para el componente 3 son Exhaustivo, Frio, Perseverante y Eficiente, por el último el componente 4 tiene de nuevo a Descuidado e Indulgente como las de mayor peso. 
+
+$3.-$ Para los datos en escala logarítmica, Victimista, Peleonero, Rudo y Frío son las de mayor peso en el componente 1, Parlanchin, Reservado, Tímido y Asertivo en el componente 2, Descuidado, Perseverante y Frío son las de mayor peso en el componente 3 y por último, el componente 4 tiene correlaciones muy bajas (menores a 0.5) y las de mayor peso son Asertivo, Perseverante y Entusiasta. 
+
+En el Chunk Cor se encuentran las correlaciones de todas las variables con cada componente,anteriormente únicamente se tomó en cuenta correlaciones mayores a 0.5 en valor absoluto, para mayor interpretabilidad tenemos la Gráfica \@ref(fig:Grafica23), en esta sólo se presentan los datos originales y los de escala logaritmica, son las proyecciones de las variables de mayor peso en los primeros 2 componentes principales pues estos rescatan la mayor varianza, podemos guiarnos por el sentido y magnitud de las fechas para intuir la influencia de cada variables en cada componente, por ejemplo entre más Peleonero te consideres, mayor valor tendrá el primero componente. Algo a notar es que las direcciones en ambas graficas son muy similares pero el primer componente en escala logaritmica rescata más varianza. 
+
+```{r Grafica23,fig.dim=c(6.5, 3.5), fig.align = "center", fig.cap= "Proyeccion en componentes" ,include=TRUE}
+plot1<-fviz_pca_var(R.CP_org,
+             col.var = "contrib") 
+plot3<-fviz_pca_var(R.CP_log,
+             col.var= "contrib")
+grid.arrange(plot1, plot3,  ncol=2)
+```
+
+Para continuar con el análisis consideramos el enfoque de $Análisis\hspace{.1cm}Factorial\hspace{0.1cm}Exploratorio$, para ello nos apoyamos de la librería pysch y la función fa. De nuevo consideramos datos sin escalar, estandarizados y con escala logaritmica, optamos por seguir la recomendación de parallel y considerar 4 factores (Chunk AFE).
+
+```{r AFE, include=FALSE}
+library(psych)
+set.seed(123)
+parallel <- fa.parallel((datos3), fa="fa", n.iter=100) #Suguiere 4 factores 
+
+FE_org <- fa(datos3, cor= "cov",
+             covar = TRUE, nfactor = 4, rotate = "none")
+
+FE_est <- fa(datos3, cor= "cor",
+             covar = TRUE, nfactor = 4, rotate = "none")
+
+FE_log <- fa(log10(datos3), cor= "cov",
+             covar = TRUE, nfactor = 4, rotate = "none")
+```
+
+```{r Criterios, include=FALSE}
+FE_org #Explica el 46%, no rechazamos H0 es buena idea usarlo, -192 BIC, RMSEA de 0.05 
+FE_est #Explica el 46%, no rechazamos H0, RMSEA de  0.05  y BIC = -192
+FE_log #Excplica el 41% no rechazamos H0, RMSEA de 0.05 , TuckerL = 0.99 y BIC= -186
+
+FE_org$communalities #¿Qué tan bien explican cada variable?  
+FE_est$communalities
+FE_log$communalities #Este explica mejor individualmentes pero los otros en general
+```
+```{r Grafica33, include=TRUE, fig.width=4.5, fig.height=4}
+fa.diagram(FE_org,cut = 0.4 , main = "Sin escala")
+fa.diagram(FE_est,cut = 0.4 , main = "Estandarizados")
+```
+De las gráficas anteriores podemos notar, 3 componentes parecen ser suficiente para resumir la información, a diferecia de componentes principales hemos reducido un poco más la dimensionalidad, además los resultados son muy similares a CP pues las variables de mayor peso se repiten casi todas. Aquí tenemos que el MR1 está asociado con una personalidad "brusca" donde ser frío o rudo la aumentan pero considerarse entusiasta la disminuye, el MR2 lo relacionamos con habilidades sociales, entre más callado menor es este valor y por último el MR3 lo asociamos con el desempeño y dedicación que le ponemos a las cosas, es una relación monótona creciente. 
+
+\newpage
+
+Para decidirnos por un modelo se probaron varias rotaciones como varimax y simplimax, también se consideraron a las variables como ordinales y de nuevo con ayuda de fa se obtuvieron las variables latentes mientras que con principal las componentes principales, más detalles en Chunk RotacionesCP, RotacionesAFE y Ordinales. Optamos por un modelo de Componente principales pues estos recuperan más varianza y dentro de estos el que usa la rotación "cluster" y maneja las variables como ordinales es el mejor rankeado pues recupera un 66% de varianza total, además nos restringimos a considerar sólo 3 componentes pues el cuarto sólo está relacionado con una variable.  
+
+```{r RotacionesCP, include=FALSE}
+PC_org <-principal(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "none")
+PC_Esc <-principal(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "none")
+print(PC_org, cut = .5) #Acumula 61 y explica las variables en este orden: 0.42 0.27 0.19 0.13
+print(PC_Esc, cut = .5) #Acumula 60 y explica en:  0.42 0.25 0.20 0.12
+
+
+PC_org_varimax <-principal(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "varimax")
+PC_Esc_varimax <-principal(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "varimax")
+print(PC_org_varimax, cut = .5) #Acumula 61 y explica en: 0.33 0.30 0.22 0.14
+print(PC_Esc_varimax, cut = .5) #Acumula 60 y explica en: 0.33 0.30 0.22 0.14
+
+
+PC_org_oblimin <-principal(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "oblimin")
+PC_Esc_oblimin <-principal(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "oblimin")
+print(PC_org_oblimin, cut = .5) #Acumula 61 y explica en: 0.42 0.27 0.19 0.13
+print(PC_Esc_oblimin, cut = .5) #Acumula 60 y explica en: 0.42 0.25 0.20 0.12
+
+
+PC_org_cluster <-principal(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "cluster")
+PC_Esc_cluster <-principal(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "cluster")
+print(PC_org_cluster, cut = .5) #Acumula 61 y explica en: 0.33 0.30 0.20 0.17
+print(PC_Esc_cluster, cut = .5) #Acumula 60 y explica en: 0.31 0.29 0.27 0.13
+```
+
+```{r RotacionesAFE, include=FALSE}
+FA_org_varimax <-fa(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "varimax")
+FA_Esc_varimax <-fa(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "varimax")
+print(FA_org_varimax, cut = .5) #Acumula 46
+print(FA_Esc_varimax, cut = .5) #Acumula 46
+
+
+FA_org_oblimin <-fa(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "oblimin")
+FA_Esc_oblimin <-fa(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "oblimin")
+print(FA_org_oblimin, cut = .5) #Ambos acumulan 46
+print(FA_Esc_oblimin, cut = .5)
+
+
+FA_org_simplimax <-fa(datos3, cor="cov",
+                   covar = TRUE, nfactor = 4, rotate = "simplimax")
+FA_Esc_simplimax <-fa(datos3, cor="cor",
+                   covar = TRUE, nfactor = 4, rotate = "simplimax")
+print(FA_org_simplimax, cut = .5) #Acumulan 46
+print(FA_Esc_simplimax, cut = .5) #Acumulan 46
+```
+
+```{r Ordinales, include=FALSE}
+CP_ord_varimax <- principal(datos3, cor="mixed",
+                   covar = TRUE, nfactor = 4, rotate = "varimax")
+CP_ord_cluster <- principal(datos3, cor="mixed",
+                   covar = TRUE, nfactor = 4, rotate = "cluster")
+
+FA_ord_oblimin <- fa(datos3, cor="mixed",
+                   covar = TRUE, nfactor = 4, rotate = "oblimin")
+FA_ord_simplimax <- fa(datos3, cor="mixed",
+                   covar = TRUE, nfactor = 4, rotate = "simplimax")
+
+print(CP_ord_varimax, cut=0.5) #Acumula 66 y explica 0.32 0.28 0.28 0.12
+print(CP_ord_cluster, cut =0.5) #Acumula 66 y explica en:  0.31 0.29 0.27 0.13
+print(FA_ord_oblimin, cut=.5)
+print(FA_ord_simplimax, cut=.5)
+```
+
+```{r Grafica43, fig.cap="Componentes principales modelo seleccionado"}
+fa.diagram(CP_ord_cluster, cut = .5, digits = 2)
+```
+
+
+Ya con nuestro modelo seleccionado pasamos a la interpretación, según las Gráfica \@ref(fig:Grafica43):
+
+Entre más Victimista, Frío y Rudo te consideras mayor es el valor en el componente 1 mientras que considerarse Indulgente lo reduce y esto tiene sentido pues las características marcan una personalidad hosca. Frío y Peleonero son las que más pesan.
+
+Cuando observamos el componente 2 este es más fácil de interpretar y parece referirse a personas sociables pues pesan variables como Asertivo, Parlanchín, Tímido y Reservado. 
+
+Sobre el componente 3 podemos notar todas las variables que pesan tienen correlación positiva, a mayor valor de cualquiera mayor será el valor del componente, ya que contempla variables como Exhaustivo y Perseverante podemos verlo como una persona optimista y/o dedicada. 

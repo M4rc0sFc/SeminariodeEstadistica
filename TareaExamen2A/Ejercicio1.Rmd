@@ -1,0 +1,179 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+geometry: margin=1.0cm
+header-includes:
+   - \usepackage[spanish]{babel}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage{amsmath}
+   - \decimalpoint
+urlcolor: blue
+---
+
+
+```{r setup, include=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(4.0, 3.0),
+	fig.pos = "htbp",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+```
+
+\section{Estimación del parámetro tau usando el método Monte Carlo y bootstrap no paramétrico.}
+
+```{r AmbienteDeTrabajo, include = FALSE}
+
+set.seed(921) #No. de cuenta que termina en 921
+
+library(ggplot2)
+
+```
+
+\subsection{\textbf{a.} Método Monte Carlo}
+
+Para estimar el parámetro que nos solicitan se generan diez mil muestras, cada muestra tiene 25 observaciones, de la variable aleatoria $\displaystyle\widehat{\tau} \sim \text{Poi}(\theta = 0)$.
+
+```{r EstimacionDetau, include = FALSE}
+
+# Generación de muestras para el estimador de tau, se almacena en un solo dataframe.
+
+mc_tau = c()
+
+for (i in 1:10000){
+  mc_tau_i = (24/25)^(sum(rpois(25, lambda = 1.5)))
+  mc_tau = c(mc_tau, mc_tau_i)
+}
+
+mc_tau_df = data.frame(mc_tau)
+mc_tau_df$sq_mc_tau_df = mc_tau_df$mc_tau^2
+
+# Esperanza y varianza. Obtenemos la esperanza de acuerdo a la fórmula proporcionada.
+
+mc_expec_tau = sum(mc_tau)/10000
+
+mc_var_tau = sum(mc_tau_df$sq_mc_tau_df)/10000 - mc_expec_tau^2
+
+
+print(max(mc_tau))
+print(mc_expec_tau)
+print(mc_var_tau)
+
+```
+
+De este modo, al estimar $E(\widehat{\tau})$ y $V(\widehat{\tau})$ se obtienen los siguientes resultados:
+
+\begin{align*}
+  \mathbb{E}\left[\widehat{\tau}\right]&\approx\frac{\sum_{i=1}^{10000}\widehat{\tau}_i}{10000} & &\& & \mathbb{V}\left[\widehat{\tau}\right] &= \mathbb{E}\left[\widehat{\tau}^2\right]-\mathbb{E}\left[\widehat{\tau}\right]^2\\
+  &= `r format(round(mc_expec_tau, digits = 7), nsmall = 7)`, & & & &\approx `r format(round(mc_var_tau, digits = 7), nsmall = 7)`.
+\end{align*}
+
+El histograma de las muestras generadas se pueden ver en la siguiente figura:
+
+```{r PrimerHistograma, include = TRUE, warning = FALSE, fig.cap = 'Histograma para las muestras generadas por Monte Carlo', out.width = '75%', fig.align = 'center'}
+
+# Histograma para tau obtenido por el método de Monte Carlo.
+
+ggplot(mc_tau_df, aes(x = mc_tau)) +
+  geom_histogram(color = 'black', fill = '#27C907', aes(y = (..count..)/sum(..count..)), bins = 30) +
+  labs(
+    title = 'Distribución de las muestras generadas',
+    x = expression(widehat(tau)),
+    y = 'Porcentaje',
+  ) +
+  scale_x_continuous(breaks = seq(0, max(mc_tau), 0.04)) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 8)) 
+
+```
+
+Para los observar los detalles del código utilizado para la estimación del parámetro se pueden consultar en el archivo RMarkdown en los chunks \textit{EstamacionDetau} y \textit{PrimerHistograma} en las lineas 47 y 83 respectivamente.
+
+\subsection{\textbf{b.} \textit{Bootstrap} no paramétrico}
+
+En contraste, para aplicar \textit{bootstrap} sólo se toma una muestra de 25 números aleatorios de una distribución Poisson($\theta$), con $\theta = 1.5$
+
+```{r Bootstrap, include = FALSE}
+
+# Generación de muestras Poisson y almacenado en un dataframe.
+
+b_tau = rpois(25, lambda = 1.5)
+
+b_tau_df = data.frame(b_tau)
+
+View(b_tau_df)
+
+# Definimos una función para obtener el parámetro buscado.
+
+estadistica_tau = function(data, index){
+  new_data = data[c(index)]
+  tau_param = (24/25)^(sum(new_data))
+  return(tau_param)
+}
+
+# Bootstrap con lo definido previamente.
+
+bstrap = boot::boot(data = b_tau, R = 10000, statistic = estadistica_tau)
+
+print(bstrap$t0)
+print(var(bstrap$t))
+
+# Dataframe auxiliar para la gráfica.
+
+b_tau_g_df = data.frame(bstrap$t)
+
+```
+
+De aquí se tiene que
+
+ 
+\newcommand{\myTauHat}{bstrap$t0}  
+\newcommand{\myTauVar}{var(bstrap$t)}  
+
+
+\begin{align}
+  \mathbb{E}\left[\widehat{\tau}\right] &\approx 0.2396035 \\
+  \mathbb{V}\left[\widehat{\tau}\right] &\approx  0.00317630 
+\end{align}
+ 
+ 
+Los detalles se encuentran en el chunk \textit{Bootstrap} la línea 107 del archivo RMarkdwon.
+
+\newpage
+A continuación se presenta, en un histograma, la visualización de las muestras obtenidas usando el método Bootstrap no paramétrico:
+
+```{r SegundoHistograma, include = TRUE, warning = FALSE, fig.cap = 'Histograma para las muestras generadas por \\textit{bootstrapping}', out.width = '75%', fig.align = 'center'}
+
+# Histograma para tau de bootstrap.
+
+ggplot(b_tau_g_df, aes(x = bstrap.t)) +
+  geom_histogram(color = 'black', fill = '#880808', aes(y = (..count..)/sum(..count..)), bins = 30) +
+  labs(
+    title = 'Distribución de las muestras generadas',
+    x = expression(widehat(tau)),
+    y = 'Porcentaje',
+  ) +
+  scale_x_continuous(breaks = seq(0, max(b_tau_g_df), 0.04)) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 8)) 
+
+```
+
+
+En este caso, los métodos difirieron en aproximadamente 0.016 para la esperanza del estimador y 0.00015 para su varianza, además hay una similaridad visual hallada. Como se esperaba, ambos se asemejan a una distribución Poisson con parámetros ligeramente modificados.
+
+La cercanía que se alcanzó es sorprendente, especialmente al considerar que el método bootstrap solo requiere datos en su forma más básica para ofrecer una estimación aceptable del parámetro y su distribución. A pesar de ello, la escasa cantidad de datos de entrada (25) contribuye a que los resultados varíen para cada aplicación. Por lo tanto, a medida que se reduce el número de observaciones, se vuelve crucial la calidad de la muestra proporcionada. Por otro lado, en repeticiones consecutivas, Monte Carlo demostró ser más coherente en sus resultados.
+
+\newpage
