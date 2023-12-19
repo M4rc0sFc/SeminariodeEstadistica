@@ -1,0 +1,419 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+geometry: margin=1.0cm
+header-includes:
+   - \usepackage[spanish]{babel}
+   - \usepackage[utf8]{inputenc}
+   - \decimalpoint
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+#Empezamos limpiando el espacio de trabajo 
+rm(list = ls(all.names = TRUE))
+
+#Elegimos nuestra carpeta
+setwd("C:/Users/tutor/Documents/Seminario Aprendizaje Estadístico Automatizado/Mi clase Semestre 2024-1/Tarea Examen 1")
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(5.9, 4.9),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+
+
+
+# Librerías
+library(dplyr)      
+library(ggplot2)    
+library(kableExtra) 
+library(GGally)     
+library(multcomp)   
+library(car)        
+library(broom)
+library(DHARMa) 
+library(ggResidpanel)
+library(data.table)
+library(kableExtra)
+```
+
+\section{2. Inferencia sobre la presión arterial diastólica, a partir del índice de masa corporal usando modelos lineales generalizados para datos continuos }\label{problema2}
+
+En la sección anterior se nos proporcionaron datos de índice de masa corporal y presión arterial diastólica sobre 400 pacientes seleccionados de forma aleatoria. 
+Se busca determinar si hay suficiente evidencia para afirmar que tener un índice de masa corporal alto se asocia con una alta presión arterial diastólica. 
+En esta ocasión haremos el análisis buscando presentar un modelo que parezca adecuado explorando los diferentes modelos lineales generalizados comúnmente usados cuando la variable dependiente es continua (normal, gamma, inversa gaussiana).
+
+```{r,include=FALSE, warning=FALSE}
+#Leemos los datos
+datos1<-read.csv("Preg1A.csv")
+```
+
+```{r,include=FALSE, warning=FALSE}
+str(datos1)
+summary(datos1)
+
+datos1$sex=factor(datos1$sex, levels=c(1,2), labels=c("hombre", "mujer"))
+levels(datos1$sex)
+summary(datos1)
+```
+
+Comenzamos el análisis presentando los datos a continuación.
+
+```{r Grafica21, echo=FALSE, fig.width= '50%', fig.height='50%', fig.cap="Observamos los datos de la presión arterial diastólica contra el índice de masa corporal"}
+#Graficamos los datos antes del análisis
+ggplot(data = datos1, aes(x=bmi, y=bpdiast, color= sex, shape=sex))+
+  geom_point(size=3) +
+  labs(x = "índice de masa corporal", y = "presión arterial diastólica")+
+   scale_color_manual(values=c("hombre"="#05C7F2","mujer"="#F24464")) +
+  theme_bw()
+```
+A partir de la Figura \@ref(fig:Grafica21), podemos observar que parece existir una tendencia a que la presión arterial diastólica crezca conforme aumenta el índice de masa corporal. Vemos que la linealidad no es algo tan preciso, además de que la varianza no parece ser constante, pues los puntos parecen ir aumentando la dispersión conforme aumenta el índice de masa corporal. Derivado de lo anterior, analizaremos los casos normal, gamma e inversa gaussiana con modelos lineales generalizados, usando mallas para elegir el mejor modelo para los datos con la mejor distribución y liga.
+
+```{r, echo=F}
+#Buscaremos y seleccionaremos un modelo entre un conjunto de posibles glm
+#Haremos una malla para ello, así podremos elegir el mejor modelo
+
+#Componente lineal: 
+# i) Transformaciones Box Tidwell (potencias) a x
+# ii) Polinomio sobre x 
+
+#Queremos probar potencias que vayan del 1 al 5 de uno en uno
+malla=seq(from = 1, to = 5, by = 1)
+Poli <- cbind("poly", malla)
+#Queremos probar potencias que vayan del -3 al 3 de .5 por si entran raíces
+malla=seq(from = -3, to = 3, by = .5)
+Pot <- cbind("pot", malla)
+
+CompLin=rbind(Poli, Pot)
+
+#Componente aleatorio:
+# i) Distribucionn Normal
+# ii) Distribucion Gamma
+# iii) Distribucion Inversa Gaussiana
+Distribuciones=c("gaussian", "Gamma", "inverse.gaussian")
+
+#Funcion liga
+# i) inverse
+# ii) identity
+# iii) log
+# iv) 1/mu^2 
+
+#Malla con las diferentes opciones a probar
+FunLigas=c("identity", "log", "inverse", "1/mu^2")
+
+
+nFunLigas=length(FunLigas)
+nDist=length(Distribuciones)
+nCompLin=dim(CompLin)[1]
+
+
+ModelList=list(NA)
+AICList=list(NA)
+BICList=list(NA)
+FormList=list(NA)
+
+#Total modelos 
+index=0
+for(k in 1:nCompLin){
+  if(CompLin[k,1]=="poly"){
+    formstring=paste0("bpdiast ~ poly(bmi,",  CompLin[k,2], ", raw=TRUE) + age + sex")
+  }else{
+    if(CompLin[k,2]==0){
+      formstring=paste0("bpdiast ~ I(log(bmi)) + age + sex")}else
+      {
+        formstring=paste0("bpdiast ~ I(bmi^(",  CompLin[k,2], ")) + age + sex")}
+  }
+  form <- as.formula(formstring)
+  for(j in 1:nDist){
+    for(l in 1:nFunLigas){
+      if(FunLigas[l]=="1/mu^2"){
+        if(Distribuciones[j]=="Gamma"){
+          index=index+1
+          Dist=get(Distribuciones[j])
+          Mod.A.Prueba=glm(form, data=datos1, family = Dist(link=FunLigas[l]))
+          ModelList[[index]]=Mod.A.Prueba
+          AICList[[index]]=AIC(Mod.A.Prueba)
+          BICList[[index]]=BIC(Mod.A.Prueba)
+          FormList[[index]]=formstring
+        }
+      }else{
+        index=index+1
+        Dist=get(Distribuciones[j])
+        Mod.A.Prueba=glm(form, data=datos1, family = Dist(link=FunLigas[l]))
+        ModelList[[index]]=Mod.A.Prueba
+        AICList[[index]]=AIC(Mod.A.Prueba)
+        BICList[[index]]=BIC(Mod.A.Prueba)
+        FormList[[index]]=formstring
+      }
+    }
+  }
+}
+```
+
+Bajo el criterio AIC observamos los 3 mejores modelos para trabajar.
+
+```{r, echo=FALSE, include=FALSE}
+#Ordenando los mejores modelos
+AICs=unlist(AICList)
+DatAICs=cbind(Index=1:length(AICs), AICs)
+DatAICs=DatAICs[order(AICs),]
+
+BICs=unlist(BICList)
+DatBICs=cbind(Index=1:length(BICs), BICs)
+DatBICs=DatBICs[order(BICs),]
+
+AICBICs <- cbind(DatAICs, DatBICs)
+
+#Algunos de los mejores
+#Hacemos un dataframe con los AIC para crear una tabla.
+AIC<-data.frame(head(AICBICs))
+AIC<-AIC[-3:-4]
+AIC
+#Elegimos los mejores modelos por el criterio AIC descartando el polinomio
+index1ro = DatAICs[1,1]
+index2do = DatAICs[2,1]
+index3ro = DatAICs[3,1]
+index4to = DatAICs[4,1]
+Mod1=ModelList[[index1ro]]
+Mod2=ModelList[[index2do]]
+Mod3=ModelList[[index3ro]]
+Mod4=ModelList[[index4to]]
+
+"Modelo con Index=144:"
+Mod1$family
+FormList[[index1ro]]
+
+"Modelo con Index=154:"
+Mod2$family
+FormList[[index2do]]
+
+"Modelo con Index=134:"
+Mod4$family
+FormList[[index4to]]
+```
+
+
+```{r,include=FALSE}
+#Hacemos un dataframe con los AIC para crear una tabla.
+TablaAIC<-data.frame("Tipo"=c("GLM","GLM","GLM"),
+           "Info.Adicional1" = c("Familia:Gamma","Familia:Gamma", "Familia:Gamma"),
+           "Info.Adicional2" = c("Liga:Identity", "Liga:Identity", "Liga:Identity"), 
+           "Fórmula" = c("bpdiast=beta_0+beta_1bmi^(1.5)+beta_2sex+beta_3age", "bpdiast=beta_0+beta_1bmi^(2)+beta_2sex+beta_3age", "bpdiast=beta_0+beta_1bmi+beta_2sex+beta_3age"), 
+           "AIC" = c(3057.721, 3057.761, 3057.932))
+  
+```
+
+```{r Tabla21, echo=FALSE}
+#Y preentamos como una tabla
+TablaAIC%>%
+  #Configuraciones básicas
+  kbl(booktabs = TRUE, caption = "Mejores 3 modelos de la esperanza de la presión arterial diastólica") %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  #Personalizamos las filas de texto
+  row_spec(0:3, background = "LightCyan" ) %>%
+  #Personalizamos la fila de nombres
+  row_spec(0, color = "#5B33FF") %>%
+  column_spec(4, color = "Coral")
+```
+
+Por una mejor interpretación, en la que podemos decir que usamos la variable del indice de masa corporal al cuadrado, la expresión matemática para modelar la esperanza de los valores de presión arterial que elegimos es la siguiente:
+
+$$E[bpdiast| bmi, age, sex] = \beta_0 + \beta_1bmi^2 + \beta_2age + \beta_3sex$$
+```{r, include=F}
+fit <- glm(bpdiast ~ I(bmi^2) + age + sex,
+           family = Gamma(link = 'identity'), data = datos1)
+
+```
+
+```{r Grafica22, include=TRUE, fig.width= '50%',fig.cap="Verificación de supuestos ajuste"}
+#A este modelo le hacemos un análisis de supuestos.
+
+par(mfrow = c(2,2)) #define cantidad renglones y columnas
+par(mar = c(4, 5, 3, 1)) #define margenes 
+plot(fit, 1, col="#FFB2B6")   #linealidad
+plot(fit, 3, col="#00FFFF")   #homocedasticidad
+plot(fit, 2, col="#CCFF00")   #normalidad
+plot(fit, 5, col="#949FD9")   #Outliers 
+```
+```{r Linealidad22, include=FALSE}
+car::residualPlots(fit, test = TRUE, col = '#BF3EFF',plot=TRUE) #De manera individual las gráficas no muestran problemas
+```
+
+```{r Homocedasticidad22, include=FALSE}
+lmtest::bptest(fit)
+#No rechazamos varianza constante
+```
+
+```{r Normalidad22, include=FALSE}
+datosfit <- broom::augment(fit)
+shapiro.test(datosfit$.std.resid)
+nortest::lillie.test(datosfit$.std.resid)
+```
+
+```{r,include=FALSE}
+#Hacemos un dataframe con los AIC para crear una tabla.
+TablaSupuestos<-data.frame("Supuestos"=c("Linealidad","Homocedasticidad","Normalidad","Normalidad"),
+           "Test" = c("Pr(>|Test stat|)","studentized Breusch-Pagan", "Shapiro-Wilk normality","Lilliefors (Kolmogorov-Smirnov) normality"),
+           "p-value" = c("I(bmi^2):0.9634 y age:0.7323", "0.3822", "0.7348","0.1247"))
+  
+```
+
+
+```{r Tabla22}
+#Y preentamos como una tabla
+TablaSupuestos%>%
+  kbl(booktabs = TRUE, align = "c", caption = "Pruebas de hipótesis en la verificación de supuestos") %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  #Personalizamos las filas de texto
+  row_spec(0:4, background = "LightCyan" ) %>%
+  #Personalizamos la fila de nombres
+  row_spec(0, color = "#5B33FF") %>%
+  column_spec(3, color = "Coral")
+```
+
+```{r PruebaF, include=FALSE}
+summary(fit)
+```
+
+A partir de la anterior, y de la verificación supuestos que podemos apreciar en la Figura \@ref(fig:Grafica22), decidimos utilizar el modelo antes mencionado, ya que no se encontró evidencia fuerte en contra de los mismos, pues los p-value obtenidos en las pruebas rechazan las hipotesis de que no se cumplan los supuestos, podemos estas pruebas usadas y sus respectivos p-value en la Tabla \@ref(tab:Tabla22).
+
+También este modelo es el segundo con el menor AIC. Además, gracias a la prueba F asociada a la tabla ANOVA, vista en el chunk "PruebaF" de nuestro R Markdown, se puede verificar que tener un indice de masa corporal alto sí afecta presión arterial diastólica.
+
+### Preguntas del Investigador
+
+Queremos saber si a mayor indice de masa corporal entonces mayores niveles de presión arterial diastólica, y con lo anterior, se procedió a realizar una prueba de hipótesis para determinar si en efecto la presión arterial diastólica aumenta con un indice de masa corporal alto. Como nuestro modelo es sencillo de interpretar, la prueba es más
+directa. En ecuaciones se ve así:
+$E[bpdiast| bmi+1, age^*, sex^*] > E[bpdiast| bmi, age^*, sex^*]$\ si y sólo si $\beta_0 + \beta_1(bmi+1)^2 + \beta_2age + \beta_3sex > \beta_0 + \beta_1bmi^2 + \beta_2age + \beta_3sex$\ si y sólo si $\beta_1((bmi+1)^2 - bmi^2) > 0$\ si y sólo si $\beta_1 > 0$, pues $bmi \geq 0$
+Por lo tanto contrastamos $H_0:\beta_1\leq0\hspace{.15 cm}vs\hspace{.15 cm}H_a:\beta_1>0$
+Y se realizó la prueba de hipótesis correspondiente, la cual se puede encontrar en el chunk "Prueba de Hipótesis", y cuyos resultados se encuentran a continuación
+
+```{r Prueba de Hipótesis, echo=F,include=T,fig.width= '10%', fig.cap="Prueba de Hipótesis"}
+K <- matrix(c(0, 1, 0, 0), ncol = 4, nrow = 1, byrow = T)
+m <- c(0)
+summary(multcomp::glht(fit, linfct = K, rhs = m, alternative = 'greater')) #Se cumple lo del investigador
+
+b1 <- coef(fit)[2]
+```
+Y a partir de los resultados obtenidos, con una significancia de .05, podemos afirmar que la presión arterial diastólica sí aumenta con el indice de masa corporal alto.
+
+
+### Gráficas
+Vamos a ver gráficas de nuestro modelo ajustado contemplando solo las edades 30, 50 y 64, así como la diferenciación entre mujeres y hombres.
+
+```{r Grafica23, echo=F, message=F, fig.width= '10%', fig.cap="Relación entre el indice de masa corporal y la presión arterial diastólica por edad y sexo"}
+point.estimates <- function(x, age, sex) {
+  coef(fit)[1] + coef(fit)[2]*x^2 + coef(fit)[3]*age + coef(fit)[4]*sex
+}
+colors1 <- c("#FD0100", "#9932CC", "#EEDE04", "#FF1493", "#2fa236", "#333ED4")
+ggplot(datos1, aes(x=bmi, y=bpdiast),size=2) + 
+  ggtitle("Relación entre BMI y BPDiast por edad y sexo")+
+  geom_point() + 
+  scale_color_manual(values = c('Hombre' = 'blue', 'Mujer' = 'red')) +
+  labs(x = "bmi",
+       y = "bpdiast") +
+  geom_function(fun = ~ point.estimates(.x, age = 30, sex = 0),
+                aes(color = colors1[4]), linewidth=0.5) +
+  geom_function(fun = ~ point.estimates(.x, age = 50, sex = 0),
+                aes(color = colors1[5]), linewidth=0.5) +
+  geom_function(fun = ~ point.estimates(.x, age = 64, sex = 0),
+                aes(color = colors1[6]), linewidth=0.5) +
+  geom_function(fun = ~ point.estimates(.x, age = 30, sex = 1),
+                aes(color = colors1[1]), linewidth=0.5) +
+  geom_function(fun = ~ point.estimates(.x, age = 50, sex = 1),
+                aes(color = colors1[2]), linewidth=0.5) +
+  geom_function(fun = ~ point.estimates(.x, age = 64, sex = 1),
+                aes(color = colors1[3]), linewidth=0.5) +
+  scale_color_identity(breaks = colors1,
+                          labels = c("Hombre 30", "Hombre 50","Hombre 64",
+                                     "Mujer 30","Mujer 50", "Mujer 64" ),
+                          guide = "legend", name = "Estimaciones")+
+  theme_minimal()
+```
+
+```{r filtrar21, include=FALSE}
+Datosfiltrados1<-  datos1[datos1$age %in% c(30, 50, 64),]
+Datosfiltrados1$age <- factor(Datosfiltrados1$age)
+str(Datosfiltrados1)
+```
+
+```{r Grafica24, include=TRUE, fig.width= '10%',fig.cap="Relación entre el indice de masa corporal y la presión arterial diastólica por edad y sexo"}
+ggplot(data = Datosfiltrados1, aes(x = bmi, y = bpdiast, color = age)) +
+  geom_point( size=3 ) +
+  labs(x = "BMI", y = "BPDiast") +
+  facet_grid(. ~ sex) +
+  theme_minimal() +
+  ggtitle("Relación entre BMI y BPDiast por edad y sexo")+
+  scale_color_manual(values =  c("30" = "#BB9FE0", "50" = "#FFF300", "64"="#00A6CA"))
+```
+En ambas Figuras \@ref(fig:Grafica23) y \@ref(fig:Grafica24) podemos ver los mismos resultados que en la sección anterior: la presión diastólica de las mujeres tiende a ser más estable pues ronda entre 75 y 95 mientras que la de los hombres va desde 65 a 100, en las mujeres parece influir más la edad pues en las de 30 años la presión se mantuvo cercana a 80, en cambio las de 50 y 64 tuvieron una presión más alta y similar; esto podría deberse a varios factores como el estilo de vida y las enfermedades crónicas, aún así podemos notar la asociación entre el bmi y la presión parece ser más fuerte para los hombres que para las mujeres y en ambos grupos las personas jovenes no tienen tan marcada esta relación creciente. 
+
+### Elección de un Modelo Definitivo
+Hacemos cambio de variable para tener ambos modelos transformados a mismas escalas y poder comparar de manera efectiva ambos modelos.
+
+```{r Ajuste 2, include=FALSE}
+fit2 <- lm(I(log(bpdiast)) ~ bmi + sex + I(age^-1), data = datos1)
+```
+
+```{r, include=FALSE}
+#Notar que el AIC de este modelo no es comparable con los AIC
+#de los otros modelos, pues éste se calcula en la escala logaritmo
+AIC(fit2)
+
+#Hacemos el cambio de variable a mano, de acuerdo al modelo tenemos lo soguiente:
+
+# Si z=ln(y) entonces e^z=y
+# Basta observar que si Y_i= e^(z_i) entonces
+# P[Y_i<=y_i] = P[e^(z_i)<=y_i] = P[-ln(y_i)<=z_i<=ln(y_i)] 
+# = P[z_i<=ln(y_i)] - P[z_i<=-ln(y_i)]
+
+# Entonces la densidad evaluada en y_i se ve como:
+
+# z~ln(y)
+# f(y_i: mu_z, sigma^2_z) = 
+# (f_z(ln(y_i): mu_z, sigma^2_z) + f_z(-ln(y_i): mu_z, sigma^2_z)) * (1/y_i)
+
+
+#a mano, después de haber hecho cambio de variable 
+loglikY=sum( log( (dnorm(log(datos1$bpdiast), fit2$fitted.values, sigma(fit2))+dnorm(-log(datos1$bpdiast), fit2$fitted.values, sigma(fit2))  )*(1/(datos1$bpdiast) )))
+
+#Por lo que al considerar 4 variables, el AIC transformado del primer modelo de regresión lineal múltiple es:
+(AICY=-2*(loglikY)+2*(4+1))
+
+#Mientras que el AIC del modelo lineal generalizado es:
+AIC(fit)
+
+```
+
+```{r,include=FALSE}
+#Hacemos un dataframe con los AIC para crear una tabla.
+TablaAICTrans<-data.frame("Tipo"=c("RLM","GLM"),
+           "Modelo" = c("E[log(bpdiast);bmi,sex,age]=beta_0+beta_1bmi+beta_2sex+beta_3age^{-1}","E[bpdiast| bmi, age, sex] = beta_0 + beta_1bmi^2 + beta_2age + beta_3sex"),
+           "AIC" = c("3055.34", "3057.761"))
+  
+```
+
+
+```{r Tabla23}
+#Y preentamos como una tabla
+TablaAICTrans%>%
+  #Configuraciones básicas
+  kbl(booktabs = TRUE, align = "c", caption = "Modelo de RLM contra GLM") %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  #Personalizamos las filas de texto
+  row_spec(0:2, background = "LightCyan" ) %>%
+  #Personalizamos la fila de nombres
+  row_spec(0, color = "#5B33FF") %>%
+  column_spec(3, color = "Coral")
+```
+El modelo lineal generalizado es una interpretación directa sobre la variable bpdiast, esto facilita el entender cómo afecta el cambiar una variable respecto a la otra. También, si queremos hacer predicciones, o tener mayor precisión en la estimación, nos quedamos con el modelo de regresión lineal múltiple pues parece que su crecimiento exponencial con valores altos de indice de masa corporal es más acertado que el de la suposición de que las observaciones provienen de una Gamma. El problema con éste, es que la interpretación es muy complicada por las transformaciones hechas a la variable bpdiast.
+
+Nosotros nos guiaremos más por el criterio de AIC con los resultados vistos en la Tabla \@ref(tab:Tabla23), y por ello elegimos el primer modelo de RLM $\mathbb{E}[\log(bpdiast);bmi,sex,age]=\beta_0+\beta_1bmi+\beta_2sex+\beta_3age^{-1}$ sobre el segundo modelo de GLM $E[bpdiast| bmi, age, sex] = \beta_0 + \beta_1bmi^2 + \beta_2age + \beta_3sex$, con familia Gamma y función liga identidad.

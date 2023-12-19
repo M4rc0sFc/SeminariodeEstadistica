@@ -1,0 +1,212 @@
+---
+output:
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+  pdf_document:
+    toc: no
+table.placement: !ht
+geometry: margin=1cm
+header-includes:
+- \usepackage[spanish]{babel}
+- \usepackage[utf8]{inputenc}
+- \decimalpoint
+- \usepackage{float}
+urlcolor: blue
+
+---
+
+```{r setup, include=FALSE}
+#Limpieza
+rm(list = ls(all.names = TRUE)) #ambiente
+gc()  #memoria
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(5.9, 4.9),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+```
+```{r Librerías, include=FALSE}
+library(readr) #Datos
+library(car)  #Funciones útiles 
+library(lmtest)  #Pruebas de hip  
+library(broom)  #Residuales estandarizados 
+library(nortest)  #Pruebas de Normalidad
+library(latex2exp)  #Formato 
+library(ggplot2)  #Gráfica   
+library(dplyr)  #Manipulación de datos
+library(tidyverse) #Manipulación de datos 
+library(GGally)
+library(gridExtra) #Pa la grafica
+library(knitr) #Pa la tabla
+```
+
+# 1.- Inferencia en la presión diastólica a partir del BMI, el sexo y la edad usando regresión lineal múltiple
+
+Se nos proporcionó la información de 400 pacientes, en ella se incluye el índice de masa corporal (bmi), el sexo y la edad. Es de nuestro interés coroborar si un bmi alto se asocia con una presión diastólica alta para cierta edad y sexo.  
+```{r Leemos y transformamos Datos1, include=FALSE}
+Datos1 <- read.csv("~/Seminario Estadistica/Tarea/Preg1A.csv")
+str(Datos1)
+
+#Necesitamos recategorizar la columna sex
+Datos1$sex[Datos1$sex == 1] <- "Hombre"
+Datos1$sex[Datos1$sex == 2] <- "Mujer"
+Datos1$sex <- factor(Datos1$sex, levels=c("Hombre", "Mujer"))
+```
+
+Comenzamos el análisis presentando los datos, teniendo en cuenta el sexo se muestra la relación entre presión vs bmi y presión vs edad. Como dato extra los indiviudos muestreados para este anális tienen en promedio 48 años, un bmi de 26 y una presión de 83 (Tabla \@ref(tab:Med)).
+```{r Grafica1, echo=FALSE, fig.width= '70%', fig.height='60%', fig.cap="Presión diastólica contra el índice de masa corporal y la edad"}
+plot1 <- ggplot(data = Datos1, aes(x=bmi, y=bpdiast, color= sex, shape= sex))+
+  geom_point(size=1.7) +
+  labs(x = "índice de masa corporal", y = "presión arterial diastólica")+
+   scale_color_manual(values=c("Hombre"="#7497CD","Mujer"="#C26395")) +
+  theme_bw()
+plot2 <- ggplot(data = Datos1, aes(x=age, y=bpdiast, color= sex, shape= sex))+
+  geom_point(size=2) +
+  labs(x = "Edad", y = "presión arterial diastólica")+
+   scale_color_manual(values=c("Hombre"="#7497CD","Mujer"="#C26395")) +
+  theme_bw()
+grid.arrange(plot1, plot2, ncol = 1)
+```
+```{r Med, fig.cap= "Meidas de tendencia", echo=FALSE}
+tabla <- data.frame(
+  Variable = c("Presión", "BMI", "Edad"),
+  Promedio = c(round(mean(Datos1$bpdiast)), round(mean(Datos1$bmi)), round(mean(Datos1$age))),
+  Mediana = c(round(median(Datos1$bpdiast)), round(median(Datos1$bmi)), round(median(Datos1$age)))
+)
+kable(tabla, format = "latex", col.names = c("Variable", "Promedio", "Mediana"), caption = "Medidas de tendencia", position = "H")
+
+```
+
+Según la Figura \@ref(fig:Grafica1) en ambos casos parece haber una relación creciente, con forme crece el bmi y la edad, crece la presión además se nota una variabilidad de presión más o menos constante pues parece depender un poco de las observaciones. Debido de esto, una regresión lineal múltiple (quizá ponderada) puede ayudarnos a modelar nuestros datos de una manera adecuada.  
+
+Tras ajustar un primer modelo sin transformar notamos problemas con Linealidad y Normalidad, para linealidad, con un p-value de  $0.01553$ se rechazó Tukey test y para normalidad, se usaron los errores estándarizados $e_{st}$, con un p-value de $0.01192$ y $0.003654$ se rechazarón las pruebas Shapiro y Kolgomorov respectivamente. Para solucionar estos problemas hacemos uso de una transformación tipo Box-Cox y Box-Tidwell las cuales suguieren una transformación logarítmica y un exponente cercano a menos uno respectivamente, así optamos por ajustar un segundo modelo: $$\mathbb{E}[\log(bpdiast);bmi,sex,age]=\beta_0+\beta_1bmi+\beta_2sex+\beta_3age^{-1}$$ Que también puede verse como: $$\mathbb{E}[\text{bpdiast}]=e^{\beta_0+\beta_1bmi+\beta_2sex+\beta_3age^{-1}+\frac{\sigma^2}2}\hspace{.35cm}o \hspace{.35cm}\mathbb{M}ed[bpdiast]=e^{\beta_0+\beta_1bmi+\beta_2sex+\beta_3age^{-1}}$$
+
+
+```{r Ajuste de modelo1, include=FALSE}
+fit1 <- lm(bpdiast ~ bmi + sex + age, data = Datos1)
+summary(fit1)
+```
+```{r Verificación de supuestos1, include=FALSE}
+par(mfrow = c(2,2)) #define cantidad renglones y columnas
+par(mar = c(4, 5, 3, 1)) #define margenes 
+plot(fit1, 1, col="#6CA860")   #linealidad
+plot(fit1, 3, col="#93CDDF")   #homocedasticidad
+plot(fit1, 2, col="#FF82AB")   #normalidad
+plot(fit1, 5, col="#FFC125")   #Outliers 
+
+#De manera rápida parecemos tener problemas con la homocedasticidad, la linealidad y la normalidad, además de unos outlayers así que realizamos un análisis más profundo con pruebas de hipótesis.
+```
+```{r Linealidad1, include=FALSE}
+car::residualPlots(fit1, test = TRUE, col = '#BF3EFF',plot=FALSE) #H0: Linealidad, Rechazamos Tukey test y el problema parece ser age
+```
+```{r Normalidad1, include=FALSE}
+datosfit1 <- broom::augment(fit1) #los e_{st}
+shapiro.test(datosfit1$.std.resid)
+nortest::lillie.test(datosfit1$.std.resid)
+#Rechazamos, no hay normalidad :( 
+```
+```{r Box-Tidwell, include=FALSE }
+boxTidwell(bpdiast ~ bmi, data= Datos1 ) #No rechazamos 
+boxTidwell(bpdiast ~ age, data= Datos1 ) #hay que transformar la edad, por interpretación se usa la lamba = -1
+```
+```{r Box-Cox, include=FALSE}
+summary(powerTransform(fit1)) #Valor cercano a cero, no se rechaza la transformación logarítmica 
+```
+```{r Ajuste 2, include=FALSE}
+fit2 <- lm(I(log(bpdiast)) ~ bmi + sex + I(age^-1), data = Datos1)
+resumen <- summary(fit2)
+```
+De manera rápida la Figura \@ref(fig:VerSup2) no parece mostrar evidencia estadística en contra de nuestros supuestos, para un análisis más completo se realizarón las pruebas (y no se rechazaron) Tukey-test para linealidad, la bptest (lmtest) y ncvTest (car) para Homocedasticidad, la Shapiro y Kolgomorov (nortest) para Normalidad y la bgtests y dwtest (lmtest) para Independencia, no tenemos valores influyentes que afecten nuestro análisis y la aleatoriedad fue garantizada por el investigador. 
+
+```{r VerSup2, out.width = '65%',fig.cap="Supuestos modelo transformado" ,include=TRUE}
+par(mfrow = c(2,2)) #define cantidad renglones y columnas 
+par(mar = c(4, 5, 3, 1)) #define margenes 
+plot(fit2, 1, col="#976894")   #linealidad
+plot(fit2, 3, col="#CC5522")   #homocedasticidad
+plot(fit2, 2, col="#2C7E41")   #normalidad
+plot(fit2, 5, col="#949FD9")   #Outliers 
+```
+```{r VerSupuestos transformado, include=FALSE}
+#Linealidad
+car::residualPlots(fit2, test = TRUE, col = '#BF3EFF',plot=TRUE) #De manera individual las gráficas no muestran problemas
+
+#Homocedasticidad
+lmtest::bptest(fit2)
+car::ncvTest(fit2)  #Se revisa general y de manera individual 
+car::ncvTest(fit2,~sex)
+car::ncvTest(fit2,~age)
+car::ncvTest(fit2,~bmi)
+#No rechazamos varianza constante
+
+#Normalidad
+datosfit2 <- broom::augment(fit2)
+shapiro.test(datosfit2$.std.resid)
+nortest::lillie.test(datosfit2$.std.resid)
+
+#Independencia
+lmtest::bgtest(fit2) # H0 : errores independientes
+lmtest::dwtest(fit2)
+```
+Ya que no se encontró evidencia estadística de que nuestro modelo no es adecuado, procedemos a trabajar con él. Tras revisar  el summary con un p-value de $1.328e-15$ rechazamos la prueba F asociada a la tabla Anova  por lo que nuestras variables parecen ser significativas, para los p-values individuales todos son menores a la significancia por lo no hay razón para considerar un modelo reducido. 
+
+¿Se puede indicar que para una persona de cierta edad y sexo, tener un índice de masa corporal alto se asocia con una alta presión arterial diastólica? Para ello notemos nos preguntan si las variables sexo y edad son inlfuyentes en la presión y al mismo tiempo la relación con el indice de masa corporal es creciente, esto para nuestro modelo se traduce a $\beta_2\neq0$, $\beta_3\neq0$ y $\beta_1>0$ todos al mismo tiempo, pero dado que la prueba F ya se rechazó nuestros $\beta_s$ son significativos, entonces nos basta con presentar la prueba: $$H_0:\beta_1\leq0\hspace{.15 cm}vs\hspace{.15 cm}H_a:\beta_1>0$$
+```{r Pruebas hipotesis, include=TRUE}
+library(multcomp)  
+K=matrix(c(0,1,0,0), ncol=4, nrow=1, byrow=TRUE)
+#Definimos nuestro vector m
+m=c(0)
+summary(glht(fit2, linfct=K, rhs=m, alternative="greater"))
+```
+Con una confianza del 95% y un p-value de $6.73e-07$, encontramos evidencia en los datos en contra de que $\beta_1\leq0$ por lo que es plausible que para cierto sexo y edad, en promedio una presión diastólica alta está asociada con un índice de masa corporal alto. 
+
+A fin de complementar los interpretación consideramos sólo tres edades; 30 años, 50 años y 64 años, en la Figura \@ref(fig:visualizacion2) se muestran los datos con esta nueva consideración.
+
+```{r filtrar , include=FALSE}
+Datosfiltrados<-  Datos1[Datos1$age %in% c(30, 50, 64),]
+Datosfiltrados$age <- factor(Datosfiltrados$age)
+str(Datosfiltrados)
+```
+
+```{r visualizacion2, fig.cap="Relación entre BMI y presión diastólica por edad restringida y sexo" ,include=TRUE}
+ggplot(data = Datosfiltrados, aes(x = bmi, y = bpdiast, color = age)) +
+  geom_point( size=3 ) +
+  labs(x = "BMI", y = "BPDiast") +
+  facet_grid(. ~ sex) +
+  theme_minimal() +
+  scale_color_manual(values =  c("30" = "#B96CA9", "50" = "#C38347", "64"="#999999"))
+```
+Según la Gráfica \@ref(fig:visualizacion2) anterior se pueden apreciar varias cosas; la presión diastólica de las mujeres tiende a ser más estable pues ronda entre 75 y 95 mientras que la de los hombres va desde 65 a 100, en las mujeres parece influir más la edad pues en las de 30 años la presión se mantuvo cercana a 80, en cambio las de 50 y 64 tuvieron una presión más alta y similar; esto podría deberse a varios factores como el estilo de vida y las enfermedades crónicas, aún así podemos notar la asociación entre el bmi y la presión parece ser más fuerte para los hombres que para las mujeres y en ambos grupos las personas jovenes no tienen tan marcada esta relación creciente. 
+
+```{r Coeficientes, fig.cap="Coeficientes estimados" ,include=TRUE}
+coeficientes_beta <- coef(fit2)
+vector_coeficientes <- as.vector(coeficientes_beta)
+sigma <- resumen$sigma^2
+
+tabla2 <- data.frame(
+  betas = c("b0", "b1", "b2", "b3","Sigma^2"),
+  coeficientes = c(vector_coeficientes, sigma)
+
+)
+kable(tabla2, format = "latex", col.names = c("Betas", "Estimados"), caption = "Estimación por MV", position = "H")
+```
+Para terminar en la Tabla \@ref(tab:Coeficientes) tenemos las estimaciones para los $\beta_s$ y $\sigma^2$ a partir de los cuales podemos concluir estimaciones puntuales, por ejemplo un hombre de 46 años con un bmi de 26 tendrá en promedio 85 de presión diastólica, lo cuál concuerda con los datos de la Tabla \@ref(tab:Med). Más detalles en el chunk "Estimación puntual". 
+
+```{r Estimación puntual, include=TRUE}
+calcular_presion_diastolica <- function(bmi, edad, sexo) {
+  resultado <- exp(4.35700 + (0.0067 * bmi) - (4.0296 / edad) - (0.0456 * sexo) + (0.0177^2)/2)
+  genero <- ifelse(sexo == 1, "mujer", "hombre")
+  mensaje <- sprintf("Para un %s de %s años con bmi de %.2f se estima que en promedio tendrá %.2f de presión diastólica.", genero, edad, bmi, resultado)
+  return(mensaje)
+}
+
+calcular_presion_diastolica(26, 46, 0) #Recordemos el nivel de referencia es Hombre, vale cero en ese caso y 1 en Mujer.  
+```
+

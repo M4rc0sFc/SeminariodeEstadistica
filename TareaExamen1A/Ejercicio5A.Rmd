@@ -1,0 +1,316 @@
+---
+output:
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+  pdf_document:
+    toc: no
+table.placement: !ht
+geometry: margin=1cm
+header-includes:
+- \usepackage[spanish]{babel}
+- \usepackage[utf8]{inputenc}
+- \decimalpoint
+- \usepackage{float}
+urlcolor: blue
+
+---
+
+```{r setup, include=FALSE}
+#Limpieza
+rm(list = ls(all.names = TRUE)) #ambiente
+gc()  #memoria
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(5.9, 4.9),
+	fig.pos = "H",
+	tab.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+```
+
+```{r Librerias, include=FALSE}
+library(readr)
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(GGally)     
+library(multcomp)   
+library(car)        
+library(broom)      
+library(DHARMa)
+library(tidyverse)
+library(plotly)
+library(VGAM)
+```
+# 5.-Inferencia en la satisfacción de habitantes con modelos ligit-multinomial. 
+
+Se registró el nivel de satisfacción (Sat) para 1681 personas, también se nos proporcionó el tipo de vivienda (Type), el nivel de influencia (Infl) en las decisiones para el mantenimiento y el nivel de contacto (Cont) con los otros inquilinos. Es de interés saber si los factores antes mencionados influyen en el nivel de satisfacción. 
+
+```{r Datos5,include=FALSE}
+setwd("~/Seminario Estadistica/Tarea")
+datos5 <- read.csv("Preg5.csv")
+
+#Cambiamos las variables a tipo factor para poder trabajar con ellas
+datos5$Sat <- factor(datos5$Sat, levels = c( "Low","Medium", "High"))
+datos5$Infl <- factor(datos5$Infl, levels = c("Low", "Medium", "High"))
+datos5$Type <- factor(datos5$Type)
+datos5$Cont <- factor(datos5$Cont, levels = c("Low", "High"))
+
+#Agregamos la frecuencia 
+datos_agrupados <- datos5 %>% 
+                   group_by(Type, Infl, Cont, Sat) %>% 
+                   summarise(count = n()) %>%
+                   mutate(count= count/ sum(count)*100) %>%
+                   rename(Frecuencia_relativa= count) %>%
+                   ungroup()
+                  
+#Desagrupamos
+Datos5 <- datos_agrupados %>%
+         group_by(Type, Infl, Cont, Sat) %>%
+         slice(rep(1, Frecuencia_relativa)) %>%
+         ungroup()
+
+```
+Comenzamos el análisis presentando en la Gráfica \@ref(fig:Grafica1) la proporción de satisfacción por cada categoria en nuestros datos. 
+```{r Grafica1, fig.cap="Frecuencias relativas por nivel de satisfacción", out.width = '80%', echo=FALSE}
+#funcion que nos grafica 
+frecuencias_plot_mod <- function(.data, frecuencias) {
+  grafica <- ggplot(
+    data = .data,
+    aes(x = Cont, y = {{frecuencias}}, fill = Sat)
+  ) +
+    geom_col(position = "dodge") +
+    facet_grid(
+      rows = vars(factor(Infl, levels = c("High", "Medium", "Low"),
+                         labels = c(
+                           "Influencia: High", "Influencia: Medium", "Influencia:Low "
+                         ))),
+      cols = vars(Type)
+    ) +
+    labs(
+      x = "Contacto que tienen con los inquilinos (Cont).",
+      y = "Frecuencia Relativa",
+      fill = "Satisfacción",
+      
+    ) +
+    theme_grey() +
+    scale_fill_manual(values = c("#BCBDE2", "#249BC0","#00685E"))
+  return(grafica)
+}
+#Imprimimos la gráfica  
+print(frecuencias_plot_mod(datos_agrupados, Frecuencia_relativa))
+```
+Podemos intuir que el tipo de vivienda más favorable es Tower mientras que la Terrace parece ser la menos querida, el que tanto se sienten incluidos en las decisiones de mantenimiento (Infl) también tiene un impacto significativo pues a mayor influencia parece ser mayor el nivel de sastisfacción aunque el contacto que tienen con otros inquilinos también muestra una ligera tendencia creciente en casi todos los lugares. Una baja influencia y vivir en la Terrace o Apartment muestran descontentos similares pero curiosamente la Terrace tiene más descontento cuando se tiene más contacto con otros inquilinos, esto probablemente se deba a que el contacto no suele ser tan profundo.  No hay tanta variabilidad en la satisfacción cuando se tiene una influencia mediana independientemente del lugar y el contacto. De todos los factores el sentido de pertenencia (Infl) parece ser el más significativo, posiblemente habrá que destinar recursos a esta área. 
+
+Dadas las características del problema (ANOVA y variable de respuesta con más de dos categorías) es buena idea trabajar con un modelo logístico multinomial, se consideró la variable de respuesta como nominal y ordinal. Ajustamos para cada caso con vglm de VGAM un modelo, se verificó que tuvieran sentido por medio de modelos nulos, para el caso nominal se contrastó uno con todas las interacciones y otro que únicamente es de efectos principales, para el caso ordinal se contrastó el uso del supuesto de probabilidad. Todas la pruebas se pudieron realizar con anova() y lrtest() (Tabla \@ref(tab:TablasAnova)) pues los modelos son anidados. 
+
+```{r Ajuste nulo1, include=FALSE}
+Ajuste_Onulo <- vglm(
+  Sat~1,
+  family= multinomial(refLevel = "Low"),
+  data = datos5
+)
+```
+
+```{r Ajuste interacciones, include=FALSE}
+Ajuste1_interacciones <- vglm(
+  Sat~Type*Infl*Cont,
+  family = multinomial(refLevel = "Low"),
+  data = datos5) 
+
+summary(Ajuste1_interacciones)
+coef(Ajuste1_interacciones, matrix = TRUE)#Estimaciones de betas
+```
+
+```{r Ajuste efectos principales, include=FALSE}
+#Ajustamos otro modelo multinomial sin considerar interacciones
+Ajuste2_SINinteracciones <- vglm(
+  Sat ~ Type + Infl + Cont,
+  family = multinomial(refLevel = "Low"),
+  data = datos5)
+
+summary(Ajuste2_SINinteracciones)
+coef(Ajuste2_SINinteracciones, matrix = TRUE)#Estimaciones de betas
+```
+
+```{r Ajuste nulo2, include=FALSE}
+Ajuste_Nnulo <- vglm(Sat ~ 1,
+                      family = cumulative(parallel = TRUE),
+                     data=datos5)
+                    
+```
+
+```{r Ajuste sin proporcionalidad, include=FALSE}
+datos5$Sat <- as.ordered(datos5$Sat)
+Ajuste3_NP <- vglm(Sat ~ Type + Cont + Infl,                         #Tiene "High" de referencia 
+                   family = cumulative(parallel = FALSE),
+                   data = datos5)
+
+summary(Ajuste3_NP)
+coef(Ajuste3_NP, matrix=TRUE)
+```
+
+```{r Ajuste con proporcionalidad, include=FALSE}
+datos5$Sat <- as.ordered(datos5$Sat)
+Ajuste4_P <- vglm(Sat ~ Type + Cont + Infl,
+                  family = cumulative(parallel = TRUE), #parallel hace la magia 
+                  data = datos5)
+
+summary(Ajuste4_P)
+exp_coef <-exp(coef(Ajuste4_P, matrix=TRUE)) #Para interpretación tenemos \pi_j / \pi_3 = exp{\eta}  
+```
+
+
+```{r Nulos vs , include=FALSE}
+anova(Ajuste_Nnulo, Ajuste1_interacciones , test = "LRT", type = "I")
+anova(Ajuste_Nnulo, Ajuste2_SINinteracciones , test = "LRT", type = "I")
+lrtest(Ajuste_Nnulo, Ajuste1_interacciones)
+
+anova(Ajuste_Onulo, Ajuste3_NP , test = "LRT", type = "I")
+anova(Ajuste_Onulo, Ajuste4_P , test = "LRT", type = "I")
+```
+
+```{r Prueba de hip nominal simple vs interacciones, include=FALSE}
+anova(Ajuste2_SINinteracciones, Ajuste1_interacciones, test = "LRT", type = "I")
+lrtest(Ajuste2_SINinteracciones, Ajuste1_interacciones)
+```
+ 
+```{r Prueba hip ordinal probabilidad, include=FALSE}
+anova(Ajuste3_NP, Ajuste4_P, test = "LRT", type = "I")
+lrtest(Ajuste3_NP, Ajuste4_P)
+```
+```{r TablasAnova, include=TRUE}
+Contraste = c("Nominal-Nulo-vs-Simple", "Interacciones-vs-Simple", "Ordinal-Nulo-vs-Simple", "Probabilidad")
+Pvalue = c("2.2e-16", " 0.2671", " 2.2e-16", "0.1992")
+tablaA <- data.frame(
+  Contraste,
+  Pvalue
+)
+kable(tablaA, format = "latex", col.names = c("CONTRASTE", "P-value"), caption = "Pruebas Anova")
+
+```
+De acuerdo a la Tabla \@ref(tab:TablasAnova) no se encontró evidencia en contra para usar el modelo de efecto principales nominal y el ordinal bajo el supuesto de probabilidad, además que ambos son significativos pues se rechaza el modelo nulo. Por cuestiones de interpretabilidad y criterios como AIC y BIC (Tabla \@ref(tab:Criterios)) optamos por trabajar con el modelo ordinal de odds proporcionales.
+
+```{r Criterios, out.width = '85%', fig.cap="Criterios para selección de modelos", include=TRUE}
+AIC_vec <- c(AIC(Ajuste1_interacciones), AIC(Ajuste2_SINinteracciones), AIC(Ajuste3_NP), AIC(Ajuste4_P))
+BIC_vec <- c(BIC(Ajuste1_interacciones), BIC(Ajuste2_SINinteracciones), BIC(Ajuste3_NP), BIC(Ajuste4_P))
+library(knitr)
+tabla <- data.frame(
+  MODELO = c("Nominal_interacciones", "Nominal_SINinteracciones", "Ordinal_NP", "Ordinal_P"),
+  AIC = AIC_vec,
+  BIC = BIC_vec
+)
+kable(tabla, format = "latex", col.names = c("Modelo", "AIC", "BIC"), caption = "Comparación de AIC y BIC")
+
+```
+```{r ODDS, echo=FALSE}
+tabla3 <- data.frame(
+  parametro = c("Intercepto 1", "Intercepto 2", "Beta 1", "Beta 2", "Beta 3", "Beta 4", "Beta 5", "Beta 6"),
+  valores = c(1.0791948, 3.5362210,0.8137002, 1.6797833, 0.5641981, 0.6974778, 0.5675686, 0.2755962)
+)
+kable(tabla3, format = "latex", col.names = c("PARAMETRO", "ESTIMACIÓN"), caption = "Exponenciación de parámetros beta")
+```
+\newpage
+La categoría de referencia para las variables explicativas es Apartment en la variable Type y Low en las demás. Se tomó como categoría de referencia en la variable de respuesta a $\pi_c=High$. El modelo se ve como sigue:
+$$\log(\frac{\mathbb{P}[Sat\leq j]}{1-\mathbb{P}[Sat\leq j]})=\beta_0^j+\beta_1\text{Atrium}+\beta_2\text{Terrace}+\beta_3\text{Tower}+\beta_4\text{Infl:Medium}+\beta_5\text{Infl:High}+\beta_6\text{Cont:High}\hspace{.35cm}j={1,2}$$ 
+
+En la Tabla \@ref(tab:ODDS) se tienen las estimaciones de los $\beta_i$ exponenciados, que indican cómo cambia la probabilidad de pertenecer a una categoría igual o más alta en relación con las categorías inferiores, dado un cambio de categoría en alguna covariable explicativa y manteniendo constantes las otras variables en el modelo. Por ejemplo, los que viven en Terrace presentan 67% más ventaja comparativa de nivel de satisfacción inferior frente a una categoría de nivel superior que los que viven en Aparment, caso contrario a cuando se vive en Tower pues ahí tiene 44% menos ventaja comparativa.
+
+
+```{r Calculo de probabilidades, include=FALSE}
+#Primero hacemos las combinaciones de todas las categorías 
+combinaciones <- unique(datos5[,3:5]) %>%
+  arrange(Type, Infl, Cont)
+#Luego las probas para cada nivel de satisfcción 
+probas <- predict(Ajuste4_P, combinaciones, type = "response")
+(datos_modelo <- bind_cols(combinaciones, probas))
+```
+```{r Filtramos los datos y le damos formato largo, include=FALSE}
+Datos_fil <- datos_modelo[c(19,21,23),] #Como son pocos renglones los elegimos manualmente 
+
+(data_long <- Datos_fil %>%  #Formato largo para mejor interpretación
+    pivot_longer(cols=c(`Low`, `Medium`, `High`),
+                 names_to = "Sat",
+                 values_to ="Probabilidad"))
+data_long$Sat <- factor(data_long$Sat, #Para estar seguro de los niveles que manejamos 
+                              levels = c("Low", "Medium", "High"))
+```
+
+Para continuar con nuestro análisis consideramos unicamente los habitantes que viven en Tower y tienen poco contacto con otros inquilinos, con ayuda de predict calculamos las probabilidades a cada cruce y realizamos un diagrama de barras (Figura \@ref(fig:Grafica2)) de dónde podemos concluir que dada una vivienda de tipo Tower y bajo contacto con otros inquilinos: \newline
+La probailidad de ser un cliente muy satisfecho crece cuanta más influencia en las decisiones del mantenimiento tenemos, cosa contraria     cuando somos clientes poco o medianamente satisfechos. \newline
+\hspace{3cm}Cuando la influencia es muy alta es muy probable ser un cliente Muy satisfecho pero si la influencia es baja no hay mucha diferencia  pues las probas son muy cercanas, una influencia media unicamente parece distinguir unicamente entre satisfecho o no sastifecho.
+
+Concluimos el análisis dejando en la Gráfica \@ref(fig:Probas) la probabilidad de tener cierto nivel de satisfacción de a cuerdo a la categoría donde nos encontramos. 
+
+```{r Grafica2, fig.cap="Probabilidades para la vivienda Tower",out.width = '65%' , include=TRUE}
+
+ggplot(data_long, aes(x = factor(Infl), y = Probabilidad, fill = Sat)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = round(Probabilidad, 2)), 
+            position = position_dodge(width = 0.8), 
+            vjust = -0.7, size = 3.5) +  # Añadir etiquetas con probabilidades
+  labs(
+    title = "Probabilidades por influencia para Tower y low Cont",
+    x = "Influencia",
+    y = "Probabilidad"
+  ) +
+  scale_fill_manual(values = c("#B9723B", "#733249", "#A51122")) +
+  theme_gray() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    legend.position = "top"
+  )
+```
+```{r, formato largos probas, include=FALSE}
+(data_long2 <- datos_modelo %>%  #Formato largo para mejor interpretación
+    pivot_longer(cols=c(`Low`, `Medium`, `High`),
+                 names_to = "Sat",
+                 values_to ="Probabilidad"))
+data_long2$Sat <- factor(data_long2$Sat, #Para estar seguro de los niveles que manejamos 
+                        levels = c("Low", "Medium", "High"))
+```
+
+```{r Probas, fig.cap="Probabilidades por nivel de satistacción",out.width = '68%' , echo=FALSE}
+
+#funcion que nos grafica 
+probas_plot_mod <- function(.data, probabilidades) {
+  grafica <- ggplot(
+    data = .data,
+    aes(x = Cont, y = {{probabilidades}}, fill = Sat)
+  ) +
+    geom_col(position = "dodge") +
+    geom_text(aes(label = round(Probabilidad, 2)), 
+          position = position_dodge(width = 0.6), 
+          vjust = -0.5, size = 3) +
+    facet_grid(
+      rows = vars(factor(Infl, levels = c("High", "Medium", "Low"),
+                         labels = c(
+                           "Influencia: High", "Influencia: Medium", "Influencia:Low "
+                         ))),
+      cols = vars(Type)
+    ) +
+    labs(
+      x = "Contacto que tienen con los inquilinos (Cont).",
+      y = "Probabilidad",
+      fill = "Satisfacción",
+      
+    ) +
+    theme_grey() +
+    scale_fill_manual(values = c("#5BC8AC", "#E6D72A","#F18D9E"))
+  return(grafica)
+}
+#Imprimimos la gráfica  
+print(probas_plot_mod(data_long2, Probabilidad))
+```
+
+
+
+
+

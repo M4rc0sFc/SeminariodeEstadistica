@@ -1,0 +1,288 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+geometry: margin=1.0cm
+header-includes:
+  - "\\usepackage[spanish]{babel}"
+  - "\\usepackage[utf8]{inputenc}"
+  - "\\decimalpoint"
+  - "\\usepackage{setspace}"
+  - "\\fontsize{4}{6}\\selectfont"
+  - "\\usepackage{graphicx}"
+  - "\\DeclareMathSizes{2}{2}{1}{1}"
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+#Empezamos limpiando el espacio de trabajo 
+rm(list = ls(all.names = TRUE))
+gc()
+
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(4.0, 3.0),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+
+
+
+# Librerías
+
+library(dplyr)      
+library(ggplot2)    
+library(kableExtra) 
+library(GGally)     
+library(multcomp)   
+library(car)        
+library(broom)      
+library(ggResidpanel)
+library(DHARMa)
+library(nortest)
+library(Deriv)
+library(pracma)
+library(MASS)
+
+```
+
+## 2.- Inferencia sobre el número de casos de cáncer de pulmón en cuatro ciudades de Dinamárca usando modelos lineales generalizados para datos de conteos. 
+
+Se registró el número de casos de cáncer de pulmón entre 1968 y 1971 en cuatro ciudades de Dinamarca. También se registró la edad de los pacientes, para propósitos de este análisis se trata como variable categórica de 5 niveles. Es de interés conocer si a mayor edad existe mayor incidencia de cáncer de pulmón. 
+
+i. Presente una gráfica de dispersión en donde en el eje x se incluyan los grupos de edad (ordenados
+de menor edad a mayor) y en el eje y la tasa de incidencia (Cases/Pop) por cada cruce Age-City,
+distinguiendo con un color la Ciudad. Describa lo que se observa.
+
+
+```{r LecturaDatos, include=FALSE, fig.cap = "Casos de Cancer"}
+
+
+#Importar el archivo con el cual trabajaremos
+
+Preg4 <- read.csv("Preg4.csv")
+#summary(datos)
+
+
+#####DATOS
+
+Preg4 <- Preg4 %>%
+  mutate(Age = as.factor(Age),
+         City = as.factor(City))
+#offset
+Preg4$logPop <- log(Preg4$Pop)
+
+#str(Preg4)
+#View(Preg4)
+
+
+```
+```{r GraficaDispersion, include=TRUE, fig.cap= "GraficaCiudades"}
+
+######Crear la gráfica de dispersion
+ggplot(Preg4, aes(x = Age, y = Cases/Pop, color = City)) +
+  geom_point(size=4)+
+  labs (x = "Edad", y = "Tasa de incidencia")+
+  scale_color_discrete(name="Ciudad")+
+  theme_minimal()
+
+```
+
+
+
+En la primera gráfica se ilustra la correlación entre la edad y la tasa de incidencia, refiriéndose esta última a la proporción de casos de cáncer de pulmón por ciudad. 
+Se puede apreciar que en todas las ciudades, a medida que aumenta la edad de los individuos, se registra una tasa de incidencia más alta. 
+En otras palabras, en todas las ciudades existe una relación directa entre la edad avanzada de los ciudadanos y una mayor tasa de incidencia de casos de cáncer de pulmón.
+
+ii. Como un primer modelo considere la distribución Poisson con liga logarítmica y las covariables Age y
+City, así como su interacción. Dado que las dos covariables son categóricas, este modelo con interacciones
+tiene muchos parámetros y es deseable trabajar con uno más simple. Para esto considere un segundo
+modelo donde sólo se usa como covariable a Age. Realice una prueba de hipótesis para argumentar
+si es posible considerar el segundo modelo [recuerde que dado que los modelos son anidados, podría
+usar la función anova(mod1, mod2, test = ”Chisq”), también puede usar multcomp, pero hay muchos
+parámetros y podría ser tedioso]. Complemente su decisión con lo que se observa en la gráfica en i) y
+con medidas como AIC o BIC.
+
+```{r Segundoinciso, include=FALSE}
+
+####ajustamos modelo poisson liga log
+mod1 <- glm(Cases ~ Age*City + offset(logPop),
+            family = poisson(link = "log" ) , 
+            data = Preg4)
+mod2 <- glm(Cases ~ Age + offset(logPop),
+            family = poisson(link="log"),
+            data = Preg4)
+mod3 <- glm(Cases~Age + City + offset(logPop),
+            family = poisson(link = "log"),
+            data =Preg4)
+summary(mod1)
+summary(mod2)
+summary(mod3)
+
+#comparamos para ver si se puede reducir 
+anova(mod1,mod2, test = "Chisq") #test Chisq hace la magia 
+anova(mod1,mod3, test = "Chisq")
+anova(mod2,mod3, test = "Chisq")
+#En todas el pvalue es mayor a la significancia, no hay razón para no considerar solamente la edad. Gana mod2
+
+
+
+```
+Se ajustaron tres modelos lineales generalizados con distribución Poisson y liga logaritmo, además en cada uno de los modelos se agrego un término offset lo cual involucra incluir una variable adicional igual al logarítmo de la variable población; el primer modelo ajustado toma en cuenta la variable Age, City así como la interacción entre estas dos variables, el segundo modelo ajustado únicamente toma en cuenta la variable Age y el tercer modelo ajustado toma en cuenta las variables Age y City. Posteriormente, al incluir los términos offset en los tres modelos ajustados, se llevó a cabo tres pruebas de hipótesis F asociada a la tabla ANOVA entre pares de modelos, es decir se comparan los modelos 1 contra 2, 1 contra 3 y 2 contra 3. Tras realizar estas prueba, concluimos que el segundo modelo ajustado se presenta como el más adecuado de todos para proceder con el análisis.
+
+
+iii. Considerando el modelo seleccionado en ii), ajuste un modelo binomial negativo. Compare ambos
+modelos e indique cuál podría ser adecuado para realizar el análisis deseado. Con el modelo seleccionado,
+calcule intervalos de confianza simultáneos de las tasas de incidencia para cada grupo de edad, incluya
+estos en la gráfica presentada en i). Comente los resultados, en particular si se puede indicar que a
+mayor edad existe mayor incidencia de cáncer de pulmón.
+
+```{r TercerInciso, include = FALSE}
+
+#Ajuste Binomial negatigo 
+mod1_bn <-  glm.nb(formula = Cases ~ Age + offset(logPop),   #Notar es glm.np
+                   link = "log" , data = Preg4)
+summary(mod1_bn)
+
+##### Criterios
+AIC_vec <- c(AIC(mod1), AIC(mod2), AIC(mod3), AIC(mod1_bn))
+BIC_vec <- c(BIC(mod1), BIC(mod2), BIC(mod3),AIC(mod1_bn))
+#mod2 tiene menor AIC que todos pero BIC sólo tiene menor el binomial negativo 
+# además podemos considerar el parametro de dispersion como 1 en mod 2 
+deviance ( mod2 )/df.residual( mod2) #parametro de dispersion
+
+
+```
+```{r VerificacionDeSupuestos, include = FALSE}
+
+#Supuestos 
+set.seed(123)
+mod2res <- simulateResiduals(fittedModel = mod2)
+plot(mod2res)
+
+set.seed(123)
+mod1_bnres <- simulateResiduals(fittedModel = mod1_bn)
+plot(mod1_bnres)
+
+
+#Ninguno tiene problemas con los supuestos 
+#Eligimos trabajar con:  Binomial negativo por el BIC y porque la grafica essta mas bonita 
+
+#Interpretación:
+summary(mod1_bn)
+coef(mod1_bn)
+a <- exp(coef(mod1_bn)[2])
+log(a)
+ #En la edad de 55-59 aumenta en 8% la tasa de casos de Cancer y así para cada exponente 
+
+#### Intervalos 
+K1= matrix(c(1, 0, 0, 0 ,0,   #Para la edad de referencia es decir para 40-54 y 55-59
+            1, 1, 0, 0, 0 ,
+            1, 0, 1, 0, 0 ,
+            1, 0, 0, 1, 0 ,
+            1, 0, 0, 0, 1 ), ncol=5, nrow=5, byrow=TRUE)
+fitE_1 <- glht(mod1_bn, linfct = K1)
+fitci_1 <- confint(fitE_1, level = 0.95)
+exp(fitci_1$confint)
+ #Estimate es el valor que tendrá y a lado tiende los intervalos :p   
+
+
+```
+
+
+Inicialmente, se ajustó un modelo binomial negativo para contrastarlo con el segundo modelo ajustado en el inciso anterior, el cual fue seleccionado entre tres modelos ajustados. Al analizar los valores de los criterios AIC y BIC y comparar estos entre ambos modelos, se concluyó que el modelo binomial negativo ajustado es el más adecuado para realizar el análisis, dado que presenta el menor valor en el criterio BIC.
+
+El modelo se ve de la siguiente manera:
+
+\begin{equation}
+\begin{aligned}
+\log(E[\text{Casos}]) = \beta_0 + \beta_1I(55-59) + \beta_2I(60-64) + \beta_3I(65-69) + \beta_4I(70-74) + \text{offset}
+\end{aligned}
+\end{equation}
+
+La interpretación de los coeficientes correspondientes al grupo de edad en el modelo seleccionado es la siguiente: en el grupo de 55 a 59 años, la tasa de casos de cáncer se incrementa en un 8%; en el grupo de 60 a 64 años, los casos de cáncer aumentan en un 50%; y para el grupo de 65 a 69 años, la tasa de cáncer se eleva en un 84%.
+
+De esta manera, en todas las ciudades se observa la misma tendencia: a medida que aumenta la edad de los grupos, la tasa de casos de cáncer de pulmón también se eleva. Por lo tanto, podemos deducir que hay una mayor incidencia de casos de cáncer de pulmón conforme incrementa la edad en todas las ciudades analizadas.
+Una vez elegido el modelo binomial negativo procedemos a verificar que se cumplan los supuestos de linealidad, normalidad y homocedasticidad.
+Se verificaron usando por el método de residuales simulados y no se encontro evidencia en contra de ninguno de nuestros supuestos.
+
+```{r CuartoInciso, include = FALSE}
+
+####Ahora consideremos la edad continua
+####Consideramos el punto medio de cada categoría y hacemos continua en ves de categorica
+AgePM <- c("40-54" = 47, "55-59" = 57, "60-64" = 62, "65-69" = 67, "70-74" = 72)
+Preg4 <- Preg4 %>% mutate(AgePrima = recode(Age, AgePM))
+str(Preg4)
+
+#View(Preg4)
+
+#Ajuste de nuevos modelos consideran continua Age
+fit1_p <- glm(Cases ~ AgePrima + offset(logPop),
+                   family = poisson(link="log"),
+                   data = Preg4)
+
+#fit2_p <- glm.fit(Cases ~ I(AgePrima^2) + offset(logPop),family = poisson(link="log"),data = Preg4)
+
+fit1_bn <- glm.nb(formula = Cases ~ AgePrima + offset(logPop),
+                  link = "log" , data = Preg4)
+
+#fit2_bn <- glm.nb(formula = Cases ~ I(AgePrima^2) + offset(logPop),link = "log" , data = Preg4)
+
+
+AIC_vec2 <- c(AIC(fit1_p), AIC(fit1_bn))
+BIC_vec2 <- c(BIC(fit1_p), BIC(fit1_bn))
+
+#El primero tiene menor de ambos criterios por lo que elegimos ese :p   
+
+deviance (fit1_p )/df.residual( fit1_p ) #parametro de dispersion = 1.2
+# 1.4 = deviance (fit2_p )/df.residual( fit2_p )
+# 1.179 = deviance (fit1_bn )/df.residual( fit1_bn )
+# 1.171 = deviance (fit2_bn )/df.residual( fit2_bn)
+
+#####Veamos los supuestos:
+
+#fit1_p
+set.seed(123)
+fit1_pres <- simulateResiduals(fittedModel = fit1_p)
+plot(fit1_pres)
+#Muy mala grafica de la derecha xd significa peligro
+
+set.seed(123)
+#fit2_bnpres <- simulateResiduals(fittedModel = fit2_bn)
+#plot(fit2_bnpres)
+#Está mejor, trabajemos con este fit2_bn
+#El modelo se ve log(E[Casos]) = beta0 + beta1 * x1 +offset
+
+#### ¿A mayor edad mayor incidencia de cancer?
+
+#K= matrix(c(1, 40,
+ #           1, 70),ncol=2, nrow=2, byrow=TRUE)
+#fitE <- glht(fit2_bn, linfct = K)
+#fitci <- confint(fitE, level = 0.90)
+#exp(fitci$confint)
+#La tasa pasa de  0.000951 a 0.000969 cuando pasamos de los 40 a los 70 años,
+#se incrementó la tasa de cancer 
+
+```
+
+
+iv. Los incisos anteriores usaron a la variable Age como categórica, sin embargo, eso dificulta un poco la
+interpretación, además de que por su naturaleza esa variable se podría haber registrado sin categorizar.
+Con los datos actuales, una aproximación sería usar el punto medio de cada intervalo de edad que define
+las categorías de Age y usar la variable resultante como una variable continua, llámela Ageprima. Ajuste
+modelos usando la distribución Poisson y Binomial Negativa con la covariable Ageprima, también
+considere la opción de incluir a Ageprima2
+. Entre esos 4 modelos indique cuál podría ser adecuado
+para realizar el análisis. Con ese modelo indique si a mayor edad existe mayor incidencia de cáncer de
+pulmón, por ejemplo, analizando si la función es creciente considerando que el intervalo de edad que
+es de interés es entre 40 y 74 años. Presente una gráfica que complemente su análisis.
+
+Se procedió al ajuste de dos modelos lineales generalizados, uno con distribución Poisson y otro Binomial Negativa, incorporando una variable continua llamada AgePrima. Para seleccionar un modelo, se recurrió a los criterios AIC y BIC, optando por el modelo que incluye la variable AgePrima junto con el offset para proseguir con el análisis. Posteriormente, se ejecutó una prueba lineal y se calcularon intervalos de confianza con el objetivo de determinar si existe una correlación entre la mayor edad y una mayor incidencia de cáncer de pulmón. Se descubrió que al pasar de los 40 a los 70 años, la tasa de incidencia se incrementa de 0.000951 a 0.000969, lo que, aunque representa un aumento mínimo, confirma la correlación deseada a través de este análisis.
+

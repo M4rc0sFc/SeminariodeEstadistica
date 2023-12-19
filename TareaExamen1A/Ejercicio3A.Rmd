@@ -1,0 +1,433 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+geometry: margin=1.0cm
+header-includes:
+  - "\\usepackage[spanish]{babel}"
+  - "\\usepackage[utf8]{inputenc}"
+  - "\\decimalpoint"
+  - "\\usepackage{setspace}"
+  - "\\fontsize{1}{3}\\selectfont"
+  - "\\usepackage{graphicx}"
+  - "\\DeclareMathSizes{1}{1}{1}{1}"
+urlcolor: blue
+---
+```{r setup, include=FALSE}
+#Empezamos limpiando el espacio de trabajo 
+rm(list = ls(all.names = TRUE))
+gc()
+
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(4.0, 3.0),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+
+
+
+# Librerías
+
+library(dplyr)      
+library(ggplot2)    
+library(kableExtra) 
+library(GGally)     
+library(multcomp)   
+library(car)        
+library(broom)      
+#library(ggResidpanel)
+library(DHARMa)
+library(nortest)
+library(Deriv)
+library(pracma)
+
+# Working directory
+
+setwd("C:\\Users\\Marco\\OneDrive\\Desktop\\Solución Examen1A")
+
+```
+
+\section{3.Inferencia sobre la eficacia de tres insecticidas usando modelos lineales generalizados para datos binarios}
+
+Se registro información sobre 862 insectos expuestos a diferentes dosis de tres insecticidas distintos, además se registro el número de insectos muertos y el número total de insectos expuestos. Es de interés identificar para cada insecticidad la dosis mínima con la que muere el 70\% de los insectos y determinar 
+cual es el mejor insecticida de los tres.
+
+i) Presente una gráfica de dispersión
+
+```{r LeerDatos, include = FALSE}
+
+datos3 <- read.csv("Preg3A.csv")
+summary(datos3)
+
+```
+
+```{r Gráficas, include = TRUE, fig.cap = "DosisvsProporcion"}
+
+datos3$Proporcion_insec_Muertos <- datos3$Killed / datos3$Number
+
+#Grafica de dispersión de proporción de insectos muertos 
+ggplot(datos3, aes(x = Deposit, y = Proporcion_insec_Muertos, color = Insecticide)) +
+  geom_point() +
+  ggtitle("Gráfica de Dispersión de Insectos Muertos") +
+    xlab("Dosis de Insecticida") +
+ylab("Proporción de Insectos Muertos") +
+scale_color_manual(values = c("A" = "red", "B" = "blue", "C" = "green")) +
+scale_x_continuous(breaks = seq(1, 8, by = 1), limits = c(1, 8)) +
+  theme_minimal(base_size = 8)
+
+
+
+```
+
+La gráfica \textbf{Dosis vs Proporcion} muestra la proporción de insectos muertos según la dosis de insecticida para los tipos de insecticida A, B y C. Todas presentan efectos a partir de 2 mg. Para los insecticidas A y B, una dosis de 2mg genera menos del 25% de mortalidad, mientras que con el insecticida C supera el 50%. Se puede notar que a medida que se incrementa la dosis la proporción de insectos muertos crece. Esta tendencia es uniforme para el insecticida C, pero para los insecticidas A y B varía tras superar los 6 mg. En cada dosis, el insecticida C demuestra mayor mortalidad que A y B, lo cual es un indicador positivo a favor su efectividad.
+
+ii) Ajusta modelos para datos binarios (ligas: logit, probit, cloglog) en donde incluya como covariables
+a Insecticide y Deposit, así como su interacción. Describa las expresiones del componente lineal o
+sistemático para cada insecticida como función de la dosis. Indique si alguno de los modelos parece
+adecuado para realizar el análisis deseado.
+
+
+```{r AjusteconInteraccion, include = FALSE}
+
+#Ajuste liga logit
+Ajuste1 <- glm(cbind(muertos = datos3$Killed, vivos = datos3$Number - datos3$Killed) ~ datos3$Insecticide + datos3$Deposit + datos3$Insecticide:datos3$Deposit, family = binomial(link = "logit"))
+
+#Ajuste liga probit
+Ajuste2 <- glm(cbind(muertos = datos3$Killed, vivos = datos3$Number - datos3$Killed) ~ datos3$Insecticide + datos3$Deposit + datos3$Insecticide:datos3$Deposit, family = binomial(link = "probit"))
+
+#Ajuste liga clogclog 
+Ajuste3 <- glm(cbind(muertos = datos3$Killed, vivos = datos3$Number - datos3$Killed) ~ datos3$Insecticide + datos3$Deposit + datos3$Insecticide:datos3$Deposit, family = binomial(link = "cloglog"))
+
+
+```
+
+```{r Summary, include = FALSE}
+
+summary(Ajuste1)
+summary(Ajuste2)
+summary(Ajuste3)
+
+```
+## Descripción del componente lineal para cada tipo de insecticida 
+
+A continuación se muestran las ecuaciones que nos dan la descripción del componente lineal para cada tipo de insecticida:
+
+\begin{equation}
+\begin{aligned}
+\eta(Y; \text{Deposit, Insecticide}) &= b_0 + b_1 \cdot I(\text{Insecticide = B}) + b_2 \cdot I(\text{Insecticide = C}) \\
+& \quad + b_3 \cdot \text{Deposit} + b_4 \cdot \text{Deposit} : I(\text{Insecticide = B}) \\
+& \quad + b_5 \cdot \text{Deposit} : I(\text{Insecticide = C}), \\
+\end{aligned}
+\end{equation}
+
+
+## Tabla con modelos ajustados 
+
+\begin{table}[h]
+\centering
+\tiny
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Variable} & \textbf{Estimate (logit)} & \textbf{Estimate (probit)} & \textbf{Estimate (cloglog)} \\
+\hline
+(Intercept) & -2.90282*** & -1.76573*** & -2.359889*** \\
+\hline
+datos3\$InsecticideB & 0.09191 & 0.08449 & 0.229117 \\
+\hline
+datos3\$InsecticideC & 1.31766 . & 1.11190** & 1.719295*** \\
+\hline
+datos3\$Deposit & 0.55965*** & 0.33647 & 0.357678*** \\
+\hline
+datos3\$InsecticideB:datos3\$Deposit & 0.06241 & 0.03072*** & 0.008812 \\
+\hline
+datos3\$InsecticideC:datos3\$Deposit & 0.43252* & 0.14821 & -0.005942 \\
+\hline
+AIC & 116.97 & 119.1 & 134.93 \\
+\hline
+\end{tabular}
+\caption{Estimación de coeficientes para cada modelo ajustado}
+\label{tab: tabla_coef_SegundoInciso}
+\end{table}
+
+
+Lós códigos para cada nivel de referencia son:  *** : 0.001,  ** : 0.01,  * : 0.05,  . : 0.1,   : 1
+Tras conocer el significado de los códigos de significancia, interpretamos los coeficientes del modelo. 
+En el primer modelo, los coeficientes del Intercepto, InsecticidaC, Deposit e interacción entre InsecticidaC y Deposit son significativos con niveles de 0.001, 0.1, 0.001 y 0.05. En los modelos dos y tres, los coeficientes significativos son el Intercepto, insecticida C y Deposit. 
+En los tres modelos, el coeficiente del insecticida C es positivo y mayor a 1, indicando que su efecto es mayor que el insecticida A, 
+referencia en los modelos. Esta observación concuerda con la gráfica previa. El modelo con menor AIC es el primero con un AIC de 116.97.
+
+\begin{itemize}
+\item Ajuste modelos para datos binarios (ligas: logit, probit, cloglog) en donde adicional a las covariables incluidas en ii), también incluya a la interacción de Insecticide con Deposit2. Describa las expresiones del componente lineal o sistemático para cada insecticida como función de la dosis. Indique si alguno de los modelos parece adecuado para realizar el análisis deseado y si tiene alguna ventaja la inclusión de los términos cuadráticos en el modelo.
+\end{itemize}
+
+\begin{equation}
+\begin{aligned}
+\eta(Y; \text{Deposit, Insecticide}) &= b_0 + b_1 \cdot I(\text{Insecticide = B}) + b_2 \cdot I(\text{Insecticide = C}) \\
+& \quad + b_3 \cdot \text{Deposit} + b_4 \cdot I(\text{Deposit}^2):I(\text{Insecticide = A}) \\
+& \quad + b_5 \cdot I(\text{Deposit}^2):I(\text{Insecticide = B}) \\
+& \quad + b_6 \cdot I(\text{Deposit}^2):I(\text{Insecticide = C}), \\
+\end{aligned}
+\end{equation}
+
+
+```{r PrimerAjuste, include = FALSE}
+
+#Ajuste liga logit
+Ajuste12 <- glm(cbind(muertos = datos3$Killed, vivos = datos3$Number - datos3$Killed) ~ datos3$Insecticide + datos3$Deposit + datos3$Insecticide:I(datos3$Deposit^2), family = binomial(link = "logit"))
+
+#Ajuste liga probit
+Ajuste22 <- glm(cbind(muertos = datos3$Killed, vivos = datos3$Number - datos3$Killed) ~ datos3$Insecticide + datos3$Deposit + datos3$Insecticide:I(datos3$Deposit^2), family = binomial(link = "probit"))
+
+#Ajuste liga clogclog 
+Ajuste32 <- glm(cbind(muertos = datos3$Killed, vivos = datos3$Number - datos3$Killed) ~ datos3$Insecticide + datos3$Deposit + datos3$Insecticide:I(datos3$Deposit^2), family = binomial(link = "cloglog"))
+
+```
+
+```{r SegundoChunkdeSummary, include = FALSE}
+
+summary(Ajuste12)
+summary(Ajuste22)
+summary(Ajuste32)
+
+```
+
+\begin{table}[h]
+\centering
+\tiny
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Variable} & \textbf{Estimate (logit)} & \textbf{Estimate (probit)} & \textbf{Estimate (cloglog)} \\
+\hline
+(Intercept) & -6.23563*** & -3.66805*** & -4.56019*** \\
+\hline
+datos3\$InsecticideB & 0.24578 & 0.14632 & 0.18296 \\
+\hline
+datos3\$InsecticideC & 2.78197*** & 1.69567*** & 1.98451*** \\
+\hline
+datos3\$Deposit & 2.10891*** & 1.23397*** & 1.35895*** \\
+\hline
+datos3\$InsecticideA:I(datos3\$$Deposit^2$) & -0.15109*** & -0.08753*** & -0.09410*** \\
+\hline
+datos3\$InsecticideB:I(datos3\$$Deposit^2$) & -0.14880*** & -0.08608*** & -0.09344*** \\
+\hline
+datos3\$InsecticideC:I(datos3\$$Deposit^2$) & -0.14087*** & -0.08905*** & -0.10986*** \\
+\hline
+AIC & 90.407 & 90.346 & 99.019 \\
+\hline
+\end{tabular}
+\caption{Estimación de los coeficientes para cada modelo ajustado}
+\label{tab:tabla_ampliada}
+\end{table}
+
+
+La tabla \ref{tab:tabla_ampliada} muestra que, con una significancia del 0.001, todos los estimadores son significativos, 
+excepto el coeficiente de la variable Insecticide B. El coeficiente de Insecticide C es positivo y supera 1,indicando que su efecto sobre la variable respuesta es mayor que el de Insecticide A, el insecticida del nivel de referencia. 
+Los coeficientes de interacción entre Insecticide y Deposit al cuadrado son negativos en los tres modelos. 
+Aunque pequeños en valor, son estadísticamente significativos al nivel 0.001. Esto sugiere que los modelos que incluyen la interacción de niveles de insecticida y dosis al cuadrado mejoran  considerablemente respecto a los modelos previamente ajustados en el inciso ii.
+Esta mejora se refleja en índices AIC’s más bajos en comparación con los modelos ajustados en el inciso anterior.
+
+
+## Cuarto inciso: Verificación de supuestos
+
+```{r VerificacionSupuestos, echo = FALSE, fig.cap = "Verificacion" }
+
+ggResidpanel::resid_panel(Ajuste22, plots = c("all"), smoother = TRUE)
+
+
+```
+
+
+
+```{r VerificacionNormalidad, echo = FALSE}
+
+datosAjuste22 <- augment(Ajuste22)
+#shapiro.test(datosAjuste22$.std.resid)
+#nortest::lillie.test(datosAjuste22$.std.resid) 
+
+```
+
+```{r SimulateResiduals, echo = FALSE, fig.cap = "Residuales DHARMA"}
+
+set.seed(123)
+residualesSimulados <- simulateResiduals(fittedModel = Ajuste22)
+plot(residualesSimulados)
+
+
+```
+
+
+## Verificación de supuestos
+
+Las gráficas que se muestran en la figuras 2 y 3 muestran en \textbf{Residual Plot} e \textbf{Index Plot} una nube de puntos alrededor de la línea del 0,
+sugiriendo que no hay evidencia en contra de los supuestos de linealidad y aleatoriedad. La gráfica \textbf{Response vs Predicted} presenta puntos formando una recta, indicando un buen ajuste del modelo. 
+En \textbf{Cook's D Plot}, solo una observación supera la distancia de Cook de 1.5. 
+El \textbf{Location-Scale plot} sugiere una estimación adecuada de la varianza y en \textbf{Residual-Leverage Plot}, 
+casi todas las observaciones, salvo una, están dentro de las líneas de contorno de Cook. 
+Considerando los residuales simulados, el modelo respeta el supuesto de linealidad: en los tests QQ-plot residuals, 
+no se rechaza la hipótesis nula, y no hay evidencia contra los supuestos de linealidad y aleatoriedad. 
+La gráfica \textbf{Residual vs Predicted} de los residuales DHARMA confirma que no hay evidencia en contra de los supuestos. 
+En conclusión, no hay información contraria a los supuestos, validando el modelo para el análisis.
+
+
+Sólo con el modelo que considere más adecuado entre los que se ajustaron en ii) y iii)
+a) Presente en la misma gráfica generada en i) los resultados de la estimación puntual para el valor
+esperado de la variable binaria (probabilidad de que un insecto muera).
+
+A continuación se presenta la misma gráfica generada en el inciso i) pero con los resultados de la estimación puntual para el valor esperado de la probabilidad de que un insecto que ha sido expuesto a algún insecticida muera pero con la misma dosis.
+
+```{r Funciones, echo = FALSE}
+
+Insecticida_A <- function(X){
+(exp(Ajuste22$coefficients[1]+Ajuste22$coefficients[4]*X+Ajuste22$coefficients[5]*I(X^2)))/(1+exp(Ajuste22$coefficients[1]+Ajuste22$coefficients[4]*X+Ajuste22$coefficients[5]*I(X^2)))
+}
+
+Insecticida_B <- function(X){
+(exp(Ajuste22$coefficients[1]+Ajuste22$coefficients[4]*X+Ajuste22$coefficients[2]*X+Ajuste22$coefficients[6]*I(X^2)))/(1+exp(Ajuste22$coefficients[1]+Ajuste22$coefficients[4]*X+Ajuste22$coefficients[2]*X+Ajuste22$coefficients[6]*I(X^2)))
+}
+
+Insecticida_C <- function(X){
+(exp(Ajuste22$coefficients[1]+Ajuste22$coefficients[4]*X+Ajuste22$coefficients[3]*X+Ajuste22$coefficients[7]*I(X^2)))/(1+exp(Ajuste22$coefficients[1]+Ajuste22$coefficients[4]*X+Ajuste22$coefficients[3]*X+Ajuste22$coefficients[7]*I(X^2)))
+}
+
+```
+
+
+```{r GraficaConFunciones, echo = FALSE}
+
+
+ggplot(datos3, aes(x=Deposit,y=Proporcion_insec_Muertos, color=Insecticide))+geom_point(lwd=2)+
+  labs(x="Dosis aplicada",y= "Proporcion insectos muertos", title="Porcentaje vs Dosis",color="Insecticida")+
+  scale_color_manual(values = c("red", "blue","green"), labels = c("A", "B","C")) +
+  geom_function(fun= Insecticida_A, aes(x=datos3$Deposit),color= "red")+
+  geom_function(fun= Insecticida_B, aes(x=datos3$Deposit),color= "blue")+
+  geom_function(fun= Insecticida_C, aes(x=datos3$Deposit),color= "green",lwd=1.2) +
+  theme_minimal(base_size = 8)
+
+
+```
+
+
+
+\begin{itemize}
+\item b) Calcule la dosis mínima para cada insecticida con la que se puede indicar que el 70 % de los insectos
+se muere.
+\end{itemize}
+
+```{r EcuacionCuadratica, echo = FALSE}
+
+# Valor de la Normal Estándar cuando x = 0.7 
+x <- 0.7
+
+valor <- qnorm(x)
+
+
+# Coeficientes del polinomio
+coefficients <- c(-0.09410 , 1.35895, -(4.56019 + valor))  # para la ecuación x^2 - 3x + 2 = 0
+coefficients2 <- c(-0.09344, (0.18296+1.35895), - (4.56019 + valor)) 
+coefficients3 <- c(-0.10986, (1.98451 + 1.35895), - (4.56019 + valor)) 
+
+# Encontrar las raíces
+resultado1 <- roots(coefficients)
+resultado2 <- roots(coefficients2) 
+resultado3 <- roots(coefficients3)
+
+
+```
+
+Las funciones encontradas para cada uno de los insecticidads de acuerdo al ajuste que elegimos, son las siguientes: 
+La  encontrada para el inciso A es:
+\begin{equation}
+\phi^{-1}(x) = -0.09410x^2 + 1.35895x - 4.56019    
+\end{equation}
+con 
+\begin{equation}
+\phi^{-1}(0.7) = 0.5244005
+\end{equation}
+
+El valor de x que resuelve esta ecuación cuadrática es: 7.22077577045696+1.37633674207882i.
+Notemos que este valor pertenece a los números complejos, por tanto esto nos indica que para el insecticida A no existe un valor de la dosis 
+para la cual la proporcion de insectos muertos sea mayor al 70 %. Esto es consistente con lo que se observa en la  gráfica anterior.
+
+
+La  función encontrada para el insecticida B es:
+\begin{equation}
+\phi^{-1}(x) = -0.09344x^2 + (0.18296+1.35895)x - 4.56019
+\end{equation}
+con 
+\begin{equation}
+\phi^{-1}(0.7) = 0.5244005
+\end{equation}
+
+El valor de x que resuelve esta ecuación cuadrática es: 4.5548348292549
+Por lo tanto,la dosis a partir de la cual mueren el 70% de los insectos al aplicarles el insecticida B es: 4.554 mg
+
+
+La  encontrada para el inciso C es:
+\begin{equation}
+\phi^{-1}(x) = -0.10986x^2 + (1.98451 + 1.35895)x - 4.56019
+\end{equation}
+con
+\begin{equation}
+\phi^{-1}(0.7) = 0.5244005
+\end{equation}
+
+El valor de x que resuelve esta ecuación cuadrática es: 1.60544781898825
+Por lo tanto,la dosis a partir de la cual mueren el 70% de los insectos al aplicarles el insecticida C es: 1.605 mg
+
+
+Se puede observar que, de entre los tres insecticidas, la dosis mínima para la cual se cumple que muere el 70 % de los insectos corresponde al insecticida C.
+
+c) Considerando la menor de las dosis encontradas en b), ¿se puede indicar que un insecticida es el
+mejor? Realice una prueba de hipótesis para argumentar en favor o en contra.
+
+```{r PrimeraPruebasDeHipotesis, echo = FALSE, results='hide'}
+
+K = matrix(c(0,1,0,0,0,0,0,  #beta_1 > beta_0 
+             0,0,1,0,0,0,0,  #beta_2 > beta_0
+             0,-1,1,0,0,0,0), ncol=7, nrow=3, byrow=TRUE) #beta_2 > beta_1
+           
+m = c(0,0,0)
+
+
+summary(glht(Ajuste22, linfct = K, rhs = m, alternative = "greater"))
+
+```
+
+Se realizó la siguiente prueba de hipótesis simultánea para determinar cual es el mejor insecticida:
+
+\begin{equation}
+\begin{aligned}
+H_{0}: \beta_{1} \leq \beta_{0} \quad vs. \quad H_{a}: \beta_{1} > \beta_{0} \\
+H_{0}: \beta_{1} \leq \beta_{0} \quad vs. \quad H_{a}: \beta_{2} > \beta_{0} \\
+H_{0}: \beta_{1} \leq \beta_{0} \quad vs. \quad H_{a}: \beta_{2} > \beta_{1} 
+\end{aligned}
+\end{equation}
+
+En la primera prueba de hipótesis se falla al rechazar la hipótesis nula mientras que para las hipótesis dos y tres se logra rechazar la hipótesis nula con una significancia del 0.001. De esta manera se concluye que el efecto del insecticida C sobre la variable respuesta es mayor al efecto del insecticida A o el insecticida B, por lo tanto es posible concluir que el insecticida C es mas efectivo que el insecticida A y el insecticida B. Esto es consistente con lo que observamos en la gráfica del inciso a) y con lo concluido en el inciso b) 
+
+d) En general ¿se puede indicar que los insecticidas A y B tienen un desempeño similar? Realice una
+prueba de hipótesis para argumentar en favor o en contra.
+
+
+```{r SegundaPruebasDeHipotesis, echo = FALSE, results='hide'}
+
+K2 = matrix(c(0,1,0,0,0,0,0,  #beta_1 > beta_0 
+             0,0,1,0,0,0,0,  #beta_1 > beta_2
+             0,0,0,0,0,0,0), ncol=7, nrow=3, byrow=TRUE) #beta_2 > beta_1
+           
+m = c(0,0,0)
+
+summary(glht(Ajuste22, linfct = K2, rhs = m, alternative = "greater"), test = Ftest())
+
+```
+
+Tras realizar la siguiente prueba de hopótesis $H_{0}: \beta_1 = 0$ vs. $H_{a}: \beta_1 \neq 0$ observamos que se rechaza la hipótesis nula, además cuando observamos el resultado del summary del modelo ajustado, Ajuste22, podemos observar que el estimador del coeficiente asociado a la variable InsecticideB no es estadísticamente significativo por lo tanto concluimos que el insecticida A y el insecticida B tienen un desempeño similar.
+
