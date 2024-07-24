@@ -1,0 +1,1004 @@
+---
+output: 
+  bookdown::pdf_document2:
+    number_sections: no
+    toc: no
+    highlight: tango
+date: "9/11/2023"
+geometry: margin=1.0cm
+header-includes:
+   - \usepackage[spanish]{babel}
+   - \usepackage{amssymb}
+   - \usepackage[utf8]{inputenc}
+   - \decimalpoint
+   - "\\fontsize{1}{3}\\selectfont"
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+# Configuración global de los bloques de código (chunk's)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.dim = c(4.0, 3.0),
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	error = F
+)
+```
+
+```{r Librerias, include = FALSE}
+#Librerias
+library(ISLR)
+library(dplyr)
+library(tidyr)
+library(forcats)
+library(broom)
+library(ggplot2)
+
+## Selección de variables y caret
+library(leaps)
+library(MASS)
+library(bestglm)
+library(glmnet)
+library(faraway)
+library(gridExtra)
+library(caret)
+library(tidyverse)
+```
+
+\section{Prediccion del promedio de porcentaje de grasa corporal usando modelos lineales generalizados para datos continuos}
+
+Es de interes conocer cuales son las variables clínicas del conjunto de datos \textit{fat} que predicen con presición el promedio de porcentaje de grasa corporal en hombres. 
+Primeramente se realizó un análisis exploratorio de datos para determinar si existian valores extremos en los datos y se eliminaron aquellas observaciones que mostraban un peso superior a 250 lbs de la variable \textit{weight}, una altura inferior a 60 pulgadas de la variable \textit{height} o un valor de cero para la variable \textit{brozek}.
+A continuación se muestran cuatro gráficas que muestran la relación entre distintas variables del conjunto de datos fat con la variable \textit{brozek} después del procesamiento inicial \textsuperscript{\textbf{[1]}}.
+
+```{r Preprocesamiento, include= FALSE}
+#Obtenemos el dataset fat del paquete faraway
+data(fat)
+View(fat)
+#Obtenemos los nombres
+names(fat)
+
+#Realizamos un summary del dataset fat
+summary(fat)
+str(fat)
+
+#Eliminamos las variables innecesarias, para ello usamos la función subset() de R
+#En este caso las variables que deseamos eliminar son siri, density y free y almacenamos el resultado en la variable fat
+fat <- subset(fat, select = -c(siri, density, free))
+fat
+names(fat)
+
+#Realizamos un summary después de quitar las variables siri, densiry y free
+summary(fat)
+
+```
+
+```{r RemocionCasosExtraños, include = FALSE}
+
+#A partir de lo observado en las gráficas anteriores eliminamos las casos con valores extraños para las variables weight y height 
+# y los valores cero para la variable brozek
+
+
+fat <- fat[fat$weight <= 250, ]
+fat <- fat[fat$height >= 60, ]
+fat <- fat[fat$brozek != 0, ]
+fat
+names(fat)
+summary(fat)
+
+
+### Verificamos si existen valores NA dentro del DataFrame. Tras correr el codigo resulta ser que no existen nulos en el dataset fat
+sum(is.na(fat))
+names(fat)
+View(fat)
+
+```
+
+```{r Graficas, include = TRUE}
+
+
+### Gráfica wrist vs brozek
+plot1 <- ggplot(data = fat, mapping = aes(x = wrist, y = brozek)) + 
+  geom_point(color = "blue") + 
+  ggtitle("wrist vs brozek") +
+  theme(plot.title = element_text(size = 8))
+
+### Gráfica height vs brozek 
+
+plot2 <- ggplot(data = fat, mapping = aes(x = height, y = brozek)) + 
+  geom_point(color = "green") + 
+  ggtitle("height vs brozek") +
+  theme(plot.title = element_text(size = 8))
+
+### Gráfica weight vs brozek
+ 
+plot3 <- ggplot(data = fat, mapping = aes(x = weight, y = brozek)) + 
+  geom_point(color = "black") + 
+  ggtitle("weight vs brozek") +
+  theme(plot.title = element_text(size = 8))
+
+
+### Gráfica abdom vs brozek 
+
+plot4 <- ggplot(data = fat, mapping = aes(x = abdom, y = brozek)) + 
+  geom_point(color = "red") + 
+  ggtitle("abdomen vs brozek") +
+  theme(plot.title = element_text(size = 8))
+
+```
+
+
+
+```{r Grid, include = TRUE}
+
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, widths = c(3, 3), heights = c(2, 2))
+
+```
+
+En las gráficas presentadas anteriormente se puede observar que valores atípicos de height y weight han sido eliminados. Con el fin de prever el valor promedio del percentaje de grasa corporal en hombres se exploraron un total de 10 modelos lineales generalizados para datos continuos con distribución Gaussiana y función de enlace identidad. El objetivo es determinar su capacidad para predecir el promedio del porcentaje de grasa corporal en hombres, es decir determinar el poder predictivo de cada modelo usando las métricas de error cuadrático medio (MSE), media de la diferencia en valor absoluto (MAE) y el coeficiente de correlación entre \textit{y} y \textit{$\hat{y}$}. Para seleccionar las variables de los modelos, se usaron tres métodos diferentes de selección de variables, a saber, selección de variables stepwise usando el criterio BIC, selección de variables por el método Lasso y selección de variables por el método del mejor subconjunto. Los hallazgos se presentan resumidos en el siguiente \textbf{Cuadro 1}\textsuperscript{\textbf{[2]}}:
+
+```{r PrimerosAjustes, include = FALSE, eval = FALSE}
+
+#Ajustes considerando efectos principales así como interacciones  y un modelo ajustado considerando variables al cuadrado.
+
+Ajuste_EfectosPrincipales <- lm(formula = brozek ~ ., data = fat)
+
+Ajuste_Interacciones <- lm(formula = brozek ~ .^2, data = fat)
+
+Ajuste_VariablesAlCuadrado <- lm(formula = brozek ~ age + I(age^2) + weight + I(weight^2) + height + I(height^2) + adipos + I(adipos^2) + neck + I(neck^2) + chest + I(chest^2) + abdom + I(abdom^2) + hip + I(hip^2) + thigh + I(thigh^2) + knee + I(knee^2) + ankle + I(ankle^2) + biceps + I(biceps^2) + forearm + I(forearm^2) + wrist + I(wrist^2), data = fat)
+
+
+#summaries 
+summary(Ajuste_EfectosPrincipales)
+summary(Ajuste_Interacciones)
+summary(Ajuste_VariablesAlCuadrado)
+
+
+#Medición del poder predictivo usando la métrica MSE
+
+#Particion
+set.seed(1)
+B=50
+Partition<- createDataPartition(fat$brozek, p = .80, groups = 4, list = FALSE, times = B)
+
+# Verificar las dimensiones de la partición
+print(dim(Partition))
+nrow(fat)
+
+# Contar observaciones en cada partición
+obs_per_partition <- colSums(Partition)
+print(obs_per_partition)
+
+# Verificar distribución de los datos (opcional)
+# Puedes hacer esto revisando estadísticas resumidas de cada subconjunto
+
+# Revisar datos de entrenamiento y prueba para una iteración
+train_example <- fat[Partition[,2], ]  # Cambia 1 por otras columnas para ver otras particiones
+test_example <- fat[-Partition[,2], ]
+
+# Inspeccionar los primeros registros
+print(head(train_example))
+head(test_example)
+
+# Inspeccionar los últimos registros
+tail(train_example)
+tail(test_example)
+
+
+#Medición del poder predictivo para efectos principales usando metrica MSE 
+mod1RHM=function(x, IndTrain, Dat){
+  train= IndTrain[,x]
+  test = (-train)
+  mod_train=lm(formula = brozek ~ ., data = Dat[train,])
+  pred_test=predict(mod_train, Dat[test,])
+  MSE=mean((Dat$brozek[test]-pred_test)^2)
+  return(MSE)
+}
+
+#Aplicamos la fórmula 
+set.seed(1)
+MSE.B.mod1= sapply(1:B,mod1RHM, IndTrain=Partition, Dat=fat)
+(MSE.RHM.mod1=mean(MSE.B.mod1))
+
+
+#Medición del poder predictivo para efectos principales usando metrica MAE 
+mod1MAE = function(x, IndTrain, Dat){
+  train = IndTrain[, x]
+  test = (-train)
+  mod_train = lm(formula = brozek ~ ., data = Dat[train, ])
+  pred_test = predict(mod_train, Dat[test, ])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+set.seed(1)
+MAE.B.mod1= sapply(1:B, mod1MAE, IndTrain=Partition, Dat=fat)
+(MAE.B.mod1=mean(MAE.B.mod1))
+
+
+
+########
+### Modelo considerando interacciones
+########
+
+#Medición del poder predictivo para efectos principales usando metrica MSE 
+mod2RHM=function(x, IndTrain, Dat){
+  train= IndTrain[,x]
+  test = (-train)
+  mod_train=lm(formula = brozek ~ .^2, data = Dat[train,])
+  pred_test=predict(mod_train, Dat[test,])
+  MSE=mean((Dat$brozek[test]-pred_test)^2)
+  return(MSE)
+}
+
+#Aplicamos la fórmula 
+
+MSE.B.mod2= sapply(1:B,mod2RHM, IndTrain=Partition, Dat=fat)
+(MSE.RHM.mod2=mean(MSE.B.mod2))
+
+
+#Medición del poder predictivo para efectos principales usando metrica MAE 
+
+mod2MAE = function(x, IndTrain, Dat){
+  train = IndTrain[, x]
+  test = (-train)
+  mod_train = lm(formula = brozek ~ .^2, data = Dat[train, ])
+  pred_test = predict(mod_train, Dat[test, ])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+
+MAE.B.mod2= sapply(1:B, mod2MAE, IndTrain=Partition, Dat=fat)
+(MAE.B.mod2=mean(MAE.B.mod2))
+
+
+
+######
+## Modelo considerando variables al cuadrado
+#####
+
+
+#Definimios la formula para las variables al cuadrado
+(continuas = names(which(sapply(fat, is.numeric))) )
+(categoricas = names(fat %>% select_if(~!is.numeric(.x))) )
+
+# definir variables predictoras continuas
+xnames=continuas[!continuas %in%  c("brozek")]
+forexp=as.formula(  paste('brozek ~.',"+", paste(paste('I(',xnames,'^2)',collapse = ' + ')  ) )) 
+forexp
+mod2=lm(forexp, fat)  
+summary(mod2)
+
+
+
+formula2 = as.formula(brozek ~ age + I(age^2) + weight + I(weight^2) + height + I(height^2) + adipos + I(adipos^2) + neck + I(neck^2) + chest + I(chest^2) + abdom + I(abdom^2) + hip + I(hip^2) + thigh + I(thigh^2) + knee + I(knee^2) + ankle + I(ankle^2) + biceps + I(biceps^2) + forearm + I(forearm^2) + wrist + I(wrist^2))
+
+
+#Medición del poder predictivo cuando consideramos variables al cuadrado usando métrica MSE
+mod3RHM=function(x, IndTrain, Dat, regla2){
+  train= IndTrain[,x]
+  test = (-train)
+  modtr=lm(regla2, Dat[train,])
+  predte=predict(modtr, Dat[test,])
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+MSE.B.mod3= sapply(1:B, mod3RHM, IndTrain=Partition, Dat=fat, regla2=forexp)
+(MSE.RHM.mod3=mean(MSE.B.mod3))
+
+#Esto era para también probar interacciones en caso de que pudiera crear una fórmula para evaluar ambos modelos (interacciones y al cuadrado con una sola formula)
+
+#MSE.B.modint = sapply(1:B, mod2RHM, IndTrain=Partition, Dat=fat, regla2=formula_interacciones)
+#(MSE.RHM.modint = mean(MSE.B.modint))
+
+
+#Medición del poder predictivo cuando consideramos variables al cuadrado usando métrica MAE
+mod3MAE = function(x, IndTrain, Dat){
+  train = IndTrain[, x]
+  test = (-train)
+  mod_train = lm(forexp, data = Dat[train, ])
+  pred_test = predict(mod_train, Dat[test, ])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+MAE.B.mod3= sapply(1:B, mod3MAE, IndTrain=Partition, Dat=fat)
+(MAE.B.mod3=mean(MAE.B.mod3))
+
+
+####
+## Coeficiente de correlación para cada modelo ajustado
+####
+
+
+# Calculando las predicciones del modelo
+y_estimada <- predict(Ajuste_EfectosPrincipales)
+y_estimada2 <- predict(Ajuste_Interacciones)
+y_estimada3 <- predict(Ajuste_VariablesAlCuadrado)
+
+# Calculando el coeficiente de correlación
+
+coef_correlacion <- cor(fat$brozek, y_estimada)
+coef_correlacion2 <- cor(fat$brozek, y_estimada2)
+coef_correlacion3 <- cor(fat$brozek, y_estimada3)
+
+# Imprimir el coeficiente de correlación
+print(coef_correlacion)
+print(coef_correlacion2)
+print(coef_correlacion3)
+
+
+```
+
+```{r EfectosPrincipales_SeleccionBIC, include = FALSE, eval = FALSE}
+
+# Modelo efectos principaeles considerando selección de variables usando el criterio BIC
+
+# se requiere definir la penalización para BIC
+pen=log(dim(fat)[1])  #depende de los datos
+print(pen)
+# Adicional al ajuste mod2 se realiza la selección
+# con step o stepAIC se empieza en mod2 y se busca entre los modelos definidos por scope
+mod4 <- stepAIC(Ajuste_EfectosPrincipales, scope =list(upper = ~ . , lower = ~1), trace = TRUE, direction ="both", k=pen)
+summary(mod4)
+AjusteEPrincipales_BIC = lm(formula = brozek ~ age + adipos + chest + abdom + wrist, data = fat)
+
+
+
+####
+# Medición del poder predictivo
+####
+
+formula4 = as.formula(brozek ~ .)
+
+mod4RHM=function(x, IndTrain, Dat, forme, upform){
+  train= IndTrain[,x]
+  test = (-train)
+  assign("DatosAux", Dat[train,], envir = .GlobalEnv) #Cuidado stepAIC o step buscan la base de datos en el environment global cuando se usa scope 
+  modAux=lm(forme, data=DatosAux)
+  penAux=log(dim(DatosAux)[1])
+  modtr=stepAIC(modAux, scope =list(upper = upform, lower = ~1), trace = FALSE,direction ="both", k=penAux)
+  predte=predict(modtr, Dat[test,])
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+#Mejor asegurar usando un for en orden, pues DatosAux estará en el environment global
+MSE.B.mod4=NA
+for(ik in 1:B){
+   MSE.B.mod4[ik]=mod4RHM(ik,IndTrain=Partition, Dat=fat, forme=formula4, upform= as.formula( ~ .))
+  }
+(MSE.RHM.mod4=mean(MSE.B.mod4))
+# [1] 17.04808
+
+
+# Medición del poder predictivo usando MAE 
+mod4MAE = function(x, IndTrain, Dat){
+  train = IndTrain[, x]
+  test = (-train)
+  assign("DatosAux", Dat[train,], envir = .GlobalEnv) #Cuidado stepAIC o step buscan la base de datos en el environment global cuando se usa scope 
+  modAux=lm(formula4, data=DatosAux)
+  penAux=log(dim(DatosAux)[1])
+  mod_train=stepAIC(modAux, scope =list(upper = formula4, lower = ~1), trace = FALSE,direction ="both", k=penAux)
+  pred_test = predict(mod_train, Dat[test, ])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+MAE.B.mod4= sapply(1:B, mod4MAE, IndTrain=Partition, Dat=fat)
+(MAE.B.mod4=mean(MAE.B.mod4))
+# 3.41743
+
+# Calculando las predicciones del modelo
+y_estimada4 <- predict(AjusteEPrincipales_BIC)
+
+# Calculando el coeficiente de correlación
+coef_correlacion4 <- cor(fat$brozek, y_estimada4)
+
+# Imprimir el coeficiente de correlación
+print(coef_correlacion4)
+
+
+```
+
+```{r ModeloInteracciones_SeleccionBIC, include = FALSE, eval = FALSE}
+
+# Modelo interacciones considerando selección de variables usando el criterio BIC
+
+##
+# Descripción del método de entrenamiento y regla final
+pen=log(dim(fat)[1])  #depende de los datos
+print(pen)
+# Adicional al ajuste mod2 se realiza la selección
+# con step o stepAIC se empieza en mod2 y se busca entre los modelos definidos por scope
+modint <- stepAIC(Ajuste_Interacciones, scope =list(upper = ~ .^2 , lower = ~1), trace = TRUE, direction ="both", k=pen)
+summary(modint)
+AjusteI_BIC <- lm(formula = brozek ~ abdom + hip + wrist + height + abdom:wrist + hip:wrist, data = fat)
+
+
+# Medición del poder predictivo usando métrica MSE
+
+formula_Interacciones = as.formula(brozek ~ .^2)
+
+mod3RHM=function(x, IndTrain, Dat, forme, upform){
+  train= IndTrain[,x]
+  test = (-train)
+  assign("DatosAux", Dat[train,], envir = .GlobalEnv) #Cuidado stepAIC o step buscan la base de datos en el environment global cuando se usa scope 
+  modAux=lm(forme, data=DatosAux)
+  penAux=log(dim(DatosAux)[1])
+  modtr=stepAIC(modAux, scope =list(upper = upform, lower = ~1), trace = FALSE,direction ="both", k=penAux)
+  predte=predict(modtr, Dat[test,])
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+
+#MSE.B.mod3= sapply(1:B,mod3RHM, IndTrain=Partition, Dat=Datos, forme=forexp, upform=upperfor)
+#Mejor asegurar usando un for en orden, pues DatosAux estará en el environment global
+MSE.B.modint=NA
+for(ik in 1:B){
+   MSE.B.modint[ik]=mod3RHM(ik,IndTrain=Partition, Dat=fat, forme=formula_Interacciones, upform= as.formula( ~ .^2))
+  }
+(MSE.RHM.modint=mean(MSE.B.modint))
+
+#Medición del poder predictivo para efectos principales usando metrica MAE 
+mod1MAE = function(x, IndTrain, Dat){
+  train = IndTrain[, x]
+  test = (-train)
+  assign("DatosAux", Dat[train,], envir = .GlobalEnv) #Cuidado stepAIC o step buscan la base de datos en el environment global cuando se usa scope 
+  modAux=lm(formula_Interacciones, data=DatosAux)
+  penAux=log(dim(DatosAux)[1])
+  modtr=stepAIC(modAux, scope =list(upper = ~ .^2, lower = ~1), trace = FALSE,direction ="both", k=penAux)
+  pred_test = predict(mod_train, Dat[test, ])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+MSE.B.modint=NA
+for(ik in 1:B){
+   MSE.B.modint[ik]=mod3RHM(ik,IndTrain=Partition, Dat=fat, forme=formula_Interacciones, upform= as.formula( ~ .^2))
+  }
+(MSE.RHM.modint=mean(MSE.B.modint))
+
+
+# Calculando las predicciones del modelo
+y_estimada5 <- predict(AjusteI_BIC)
+
+# Calculando el coeficiente de correlación
+
+coef_correlacion5 <- cor(fat$brozek, y_estimada5)
+
+# Imprimir el coeficiente de correlación
+print(coef_correlacion5)
+
+
+```
+
+
+```{r ModeloCuadratico_SeleccionBIC, include = FALSE, eval = FALSE}
+
+##
+# Descripción del método de entrenamiento y regla final
+#Definimios la formula para las variables al cuadrado
+
+(continuas = names(which(sapply(fat, is.numeric))) )
+(categoricas = names(fat %>% select_if(~!is.numeric(.x))) )
+
+# definir variables predictoras continuas
+xnames=continuas[!continuas %in%  c("brozek")]
+formula_variablesAlCuadrado=as.formula(  paste('brozek ~.',"+", paste(paste('I(',xnames,'^2)',collapse = ' + ')  ) )) 
+formula_variablesAlCuadrado
+AjusteCuadratico <- lm(formula_variablesAlCuadrado, fat)  # regla final, la que se usaría en producción
+summary(AjusteCuadratico)
+
+
+
+# se requiere una fórmula para definir el modelo más complejo
+upperfor = as.formula(  paste('~.',"+", paste('I(',xnames,'^2)',collapse = ' + ') ) ) 
+upperfor
+# se requiere definir la penalización para BIC
+pen=log(dim(fat)[1])  #depende de los datos
+print(pen)
+# Adicional al ajuste mod3 se realiza la selección
+# con step o stepAIC se empieza en mod2 y se busca entre los modelos definidos por scope
+modelo_Cuadratico <- stepAIC(AjusteCuadratico, scope =list(upper = upperfor , lower = ~1), trace = TRUE, direction ="both", k=pen)
+summary(modelo_Cuadratico)
+AjusteCuadratico_BIC <- lm(formula = brozek ~ age + abdom + biceps + wrist + I(adipos^2) + I(chest^2) + I(biceps^2), data = fat)
+
+
+##
+# Medición del poder predictivo usando la métrica MSE
+mod3RHM=function(x, IndTrain, Dat, forme, upform){
+  train= IndTrain[,x]
+  test = (-train)
+  assign("DatosAux", Dat[train,], envir = .GlobalEnv) #Cuidado stepAIC o step buscan la base de datos en el environment global cuando se usa scope 
+  modAux=lm(formula_variablesAlCuadrado, data=DatosAux)
+  penAux=log(dim(DatosAux)[1])
+  modtr=stepAIC(modAux, scope =list(upper = formula_variablesAlCuadrado, lower = ~1), trace = FALSE,direction ="both", k=penAux)
+  predte=predict(modtr, Dat[test,])
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+
+#MSE.B.mod3= sapply(1:B,mod3RHM, IndTrain=Partition, Dat=Datos, forme=forexp, upform=upperfor)
+#Mejor asegurar usando un for en orden, pues DatosAux estará en el environment global
+MSE.B.modCuad=NA
+for(ik in 1:B){
+   MSE.B.modCuad[ik]=mod3RHM(ik,IndTrain=Partition, Dat=fat, forme=formula_variablesAlCuadrado, upform = upperfor)
+  }
+(MSE.RHM.modCuad=mean(MSE.B.modCuad))
+# [1] 17.06051
+
+
+#Medicion del poder predictivo usando metrica MAE 
+mod6MAE = function(x, IndTrain, Dat){
+  train = IndTrain[, x]
+  test = (-train)
+  assign("DatosAux", Dat[train,], envir = .GlobalEnv) #Cuidado stepAIC o step buscan la base de datos en el environment global cuando se usa scope 
+  modAux=lm(formula_variablesAlCuadrado, data=DatosAux)
+  penAux=log(dim(DatosAux)[1])
+  mod_train=stepAIC(modAux, scope =list(upper = formula_variablesAlCuadrado, lower = ~1), trace = FALSE,direction ="both", k=penAux)
+  pred_test = predict(mod_train, Dat[test, ])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+MAE.B.modCuad=NA
+for(ik in 1:B){
+   MAE.B.modCuad[ik]=mod6MAE(ik,IndTrain=Partition, Dat=fat)
+  }
+(MAE.RHM.modCuad=mean(MAE.B.modCuad))
+
+# Calculando las predicciones del modelo
+y_estimada6 <- predict(AjusteCuadratico_BIC)
+
+# Calculando el coeficiente de correlación
+
+coef_correlacion6 <- cor(fat$brozek, y_estimada6)
+
+# Imprimir el coeficiente de correlación
+print(coef_correlacion6)
+
+
+```
+
+
+```{r MetodoLasso_EfectosPrincipales, include = FALSE, eval= FALSE}
+
+##############################
+### Cuarto modelo a explorar
+### Incluyendo las variables continuas al cuadrado  
+###  y selección usando lasso con glmnet
+##############################
+
+##
+# Descripción del método de entrenamiento y regla final
+
+# Usaremos la fórmula con variables al cuadrado para crear matrix X 
+for_efectosPrincipales <- as.formula(brozek ~ .)
+Xmod4 <- model.matrix(for_efectosPrincipales, data=fat)[,-1]
+Ymod4 <- fat[,"brozek"] 
+
+#recordar que para lasso alpha=1 (está por default)
+#por otro lado hay dos opciones de estimadores, 
+# relax = FALSE está por default (lo usaremos por ahora)
+# recordar que esos no son EMV
+mod4.lasso = glmnet(Xmod4, Ymod4, family = gaussian("identity"), nlambda = 200)
+#Faltaría tunear (definir valor) de lambda
+
+#glmnet tiene una opción para tunear usando K-CV con base en poder predictivo
+set.seed(1)
+mod4.lasso.tun=cv.glmnet(Xmod4, Ymod4, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+plot(mod4.lasso.tun)
+print.cv.glmnet(mod4.lasso.tun)
+mod4.lasso.tun$lambda.min   #mod4.lasso.tun$lambda.1se
+coef(mod4.lasso.tun, s = "lambda.min")
+AjusteEP_Lasso <- lm(formula = brozek ~ age + height + neck + abdom + wrist, data = fat)
+
+
+
+
+# Regla final es aquella que usa el lambda seleccionado
+
+predict(mod4.lasso.tun, newx = Xmod4[1:5,], type = "response", s = "lambda.min")
+
+
+# Nota sobre el preprocesamiento para el usuario final.
+# Se usa model.matrix, así que para nuevos datos y
+# cuando hay variables categóricas
+# se deben guardar 
+# los niveles de todas las variables categóricas y su orden
+# así se puede construir de forma adecuada la matrix
+
+
+
+##
+# Medición del poder predictivo
+# aquí si es importante incluir el tuneo dentro del entrenamiento
+
+mod4RHM=function(x, IndTrain, Dat, forme){
+  train= IndTrain[,x]
+  test = (-train)
+  Xmod4ttotal = model.matrix(forme, data=fat)[,-1]
+  Xmod4t = Xmod4ttotal[train, ]
+  Ymod4t = Dat[train,"brozek"] 
+  mod4t.lasso.tun=cv.glmnet(Xmod4t, Ymod4t, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+  predte=predict(mod4t.lasso.tun, newx = Xmod4ttotal[test,], type = "response", s = "lambda.min")
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+set.seed(1)
+MSE.B.mod4= sapply(1:B,mod4RHM, IndTrain=Partition, Dat=fat, forme=for_efectosPrincipales)
+(MSE.RHM.mod4=mean(MSE.B.mod4))
+
+
+#Medicion del poder predictivo usando metrica MAE 
+mod7MAE = function(x, IndTrain, Dat, forme){
+  train = IndTrain[, x]
+  test = (-train)
+  Xmod4ttotal = model.matrix(forme, data=fat)[,-1]
+  Xmod4t = Xmod4ttotal[train, ]
+  Ymod4t = Dat[train,"brozek"] 
+  mod4t.lasso.tun=cv.glmnet(Xmod4t, Ymod4t, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+  pred_test=predict(mod4t.lasso.tun, newx = Xmod4ttotal[test,], type = "response", s = "lambda.min")
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+set.seed(1)
+MAE.B.mod7= sapply(1:B,mod7MAE, IndTrain=Partition, Dat=fat, forme=for_efectosPrincipales)
+(MAE.mod7=mean(MAE.B.mod7))
+
+
+# Calculando las predicciones del modelo
+y_estimada7 <- predict(AjusteEP_Lasso, data = fat)
+
+
+# Calculando el coeficiente de correlación
+coef_correlacion7 <- cor(fat$brozek, y_estimada7)
+
+# Imprimir el coeficiente de correlación
+print(coef_correlacion7)
+
+```
+
+```{r MetodoLasso_Interacciones, include = FALSE, eval = FALSE}
+
+##############################
+### Cuarto modelo a explorar
+### Incluyendo las variables continuas al cuadrado  
+###  y selección usando lasso con glmnet
+##############################
+
+##
+# Descripción del método de entrenamiento y regla final
+
+# Usaremos la fórmula con variables al cuadrado para crear matrix X 
+formula_interacciones <- as.formula(brozek ~ .^2)
+formula_interacciones
+Xmod4 <- model.matrix(formula_interacciones, data=fat)[,-1]
+Ymod4 <- fat[,"brozek"] 
+
+#recordar que para lasso alpha=1 (está por default)
+#por otro lado hay dos opciones de estimadores, 
+# relax = FALSE está por default (lo usaremos por ahora)
+# recordar que esos no son EMV
+mod4.lasso = glmnet(Xmod4, Ymod4, family = gaussian("identity"), nlambda = 200)
+#Faltaría tunear (definir valor) de lambda
+
+#glmnet tiene una opción para tunear usando K-CV con base en poder predictivo
+set.seed(1)
+mod4.lasso.tun=cv.glmnet(Xmod4, Ymod4, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+plot(mod4.lasso.tun)
+print.cv.glmnet(mod4.lasso.tun)
+mod4.lasso.tun$lambda.min   #mod4.lasso.tun$lambda.1se
+coef(mod4.lasso.tun, s = "lambda.min")
+AjusteI_Lasso <- lm(formula = brozek ~ abdom + age:thigh + age:ankle + age:biceps + height:neck + height:wrist + neck:wrist + abdom:forearm, data = fat)
+summary(AjusteI_Lasso)
+
+
+# Regla final es aquella que usa el lambda seleccionado
+
+y_estimada8 <- predict(mod4.lasso.tun, newx = Xmod4, type = "response", s = "lambda.min")
+
+
+# Nota sobre el preprocesamiento para el usuario final.
+# Se usa model.matrix, así que para nuevos datos y
+# cuando hay variables categóricas
+# se deben guardar 
+# los niveles de todas las variables categóricas y su orden
+# así se puede construir de forma adecuada la matrix
+
+
+
+
+##
+# Medición del poder predictivo
+# aquí si es importante incluir el tuneo dentro del entrenamiento
+
+mod5RHM=function(x, IndTrain, Dat, forme){
+  train= IndTrain[,x]
+  test = (-train)
+  Xmod4ttotal = model.matrix(forme, data=Dat)[,-1]
+  Xmod4t = Xmod4ttotal[train, ]
+  Ymod4t = Dat[train,"brozek"] 
+  mod4t.lasso.tun=cv.glmnet(Xmod4t, Ymod4t, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+  predte=predict(mod4t.lasso.tun, newx = Xmod4ttotal[test,], type = "response", s = "lambda.min")
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+set.seed(1)
+MSE.B.mod5= sapply(1:B,mod5RHM, IndTrain=Partition, Dat=fat, forme=formula_interacciones)
+(MSE.RHM.mod5=mean(MSE.B.mod5))
+
+
+
+#Medicion del poder predictivo usando metrica MAE 
+mod7MAE = function(x, IndTrain, Dat, forme){
+  train = IndTrain[, x]
+  test = (-train)
+  Xmod4ttotal = model.matrix(forme, data=fat)[,-1]
+  Xmod4t = Xmod4ttotal[train, ]
+  Ymod4t = Dat[train,"brozek"] 
+  mod4t.lasso.tun=cv.glmnet(Xmod4t, Ymod4t, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+  pred_test=predict(mod4t.lasso.tun, newx = Xmod4ttotal[test,], type = "response", s = "lambda.min")
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+set.seed(1)
+MAE.B.mod8= sapply(1:B,mod7MAE, IndTrain=Partition, Dat=fat, forme=formula_interacciones)
+(MAE.mod8=mean(MAE.B.mod8))
+
+
+
+# Calculando el coeficiente de correlación
+
+coef_correlacion8 <- cor(fat$brozek, y_estimada8)
+
+# Imprimir el coeficiente de correlación
+
+print(coef_correlacion8)
+
+```
+
+
+```{r Lasso_VariablesAlCuadrado, include = FALSE, eval = FALSE}
+
+##############################
+### Incluyendo las variables continuas al cuadrado  
+###  y selección usando lasso con glmnet
+##############################
+
+
+
+
+# Usaremos la fórmula con variables al cuadrado para crear matrix X 
+formula_variablesAlCuadrado
+Xmod4 <- model.matrix(formula_variablesAlCuadrado, data=fat)[,-1]
+Ymod4 <- fat[,"brozek"] 
+
+#recordar que para lasso alpha=1 (está por default)
+#por otro lado hay dos opciones de estimadores, 
+# relax = FALSE está por default (lo usaremos por ahora)
+# recordar que esos no son EMV
+mod4.lassoCuad = glmnet(Xmod4, Ymod4, family = gaussian("identity"), nlambda = 200)
+#Faltaría tunear (definir valor) de lambda
+
+#glmnet tiene una opción para tunear usando K-CV con base en poder predictivo
+set.seed(1)
+mod4.lasso.tun=cv.glmnet(Xmod4, Ymod4, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+plot(mod4.lasso.tun)
+print.cv.glmnet(mod4.lasso.tun)
+mod4.lasso.tun$lambda.min   #mod4.lasso.tun$lambda.1se
+coef(mod4.lasso.tun, s = "lambda.min")
+
+# Regla final es aquella que usa el lambda seleccionado
+
+y_estimada9 <- predict(mod4.lasso.tun, newx = Xmod4, type = "response", s = "lambda.min")
+
+
+# Nota sobre el preprocesamiento para el usuario final.
+# Se usa model.matrix, así que para nuevos datos y
+# cuando hay variables categóricas
+# se deben guardar 
+# los niveles de todas las variables categóricas y su orden
+# así se puede construir de forma adecuada la matrix
+
+
+
+##
+# Medición del poder predictivo usando metrica MSE
+# aquí si es importante incluir el tuneo dentro del entrenamiento
+
+mod6RHM=function(x, IndTrain, Dat, forme){
+  train= IndTrain[,x]
+  test = (-train)
+  Xmod4ttotal = model.matrix(forme, data=Dat)[,-1]
+  Xmod4t = Xmod4ttotal[train, ]
+  Ymod4t = Dat[train,"brozek"] 
+  mod4t.lasso.tun=cv.glmnet(Xmod4t, Ymod4t, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+  predte=predict(mod4t.lasso.tun, newx = Xmod4ttotal[test,], type = "response", s = "lambda.min")
+  MSE=mean((Dat$brozek[test]-predte)^2)
+  return(MSE)
+}
+
+set.seed(1)
+MSE.B.modCuad = sapply(1:B,mod6RHM, IndTrain=Partition, Dat=fat, forme=formula_variablesAlCuadrado)
+(MSE.RHM.modCuad=mean(MSE.B.modCuad))
+
+
+# Medición del poder predictivo usando metrica MAE
+mod7MAE = function(x, IndTrain, Dat, forme){
+  train = IndTrain[, x]
+  test = (-train)
+  Xmod4ttotal = model.matrix(forme, data=fat)[,-1]
+  Xmod4t = Xmod4ttotal[train, ]
+  Ymod4t = Dat[train,"brozek"] 
+  mod4t.lasso.tun=cv.glmnet(Xmod4t, Ymod4t, nfolds = 5, type.measure ="mse", gamma = 0, relax = FALSE, family = gaussian("identity"), nlambda = 50)
+  pred_test=predict(mod4t.lasso.tun, newx = Xmod4ttotal[test,], type = "response", s = "lambda.min")
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+
+set.seed(1)
+MAE.B.mod9= sapply(1:B,mod7MAE, IndTrain=Partition, Dat=fat, forme=formula_variablesAlCuadrado)
+(MAE.mod9=mean(MAE.B.mod9))
+
+
+
+# Calculando el coeficiente de correlación
+
+coef_correlacion9 <- cor(fat$brozek, y_estimada9)
+
+# Imprimir el coeficiente de correlación
+
+print(coef_correlacion9)
+
+
+```
+
+
+
+```{r MejorSubconjunto, include = FALSE, eval = FALSE}
+
+#----------------------- a) Mejor subconjunto -------------------------------------------------------------------------#
+
+#Procedemos a calcular el mejor subconjunto de variables usando la función regsubsets del paquete leaps
+
+### La regla: 
+mejor_subconjunto <- regsubsets(brozek ~ age + weight + height + adipos + neck
+                                + chest + abdom + hip + thigh + knee + ankle +
+                                  biceps + forearm + wrist, data = fat,
+                                method = "exhaustive", nvmax = 14)
+#summary del mejor subconjunto
+mejor_sub <- summary(mejor_subconjunto)
+#Usamos la siguiente grafica para determinar la cantidad de variables con la cual trabajar
+plot(mejor_subconjunto, scale = "bic")
+### Coeficientes de las covariables que entran al modelo bajo la selección
+### del mejor subconjunto.
+coef(mejor_subconjunto, 3)
+### Ajuste que no considera ninguna covariable en el modelado, es decir, Ajuste Nulo
+AjusteNulo <- lm(formula = brozek ~ 1,
+                 data = fat)
+### Ajuste con las covariables que entran al modelo bajo la selección
+### del mejor subconjunto
+AjusteMejor_subconjunto <- lm(formula = brozek ~ height + abdom  + wrist,
+                              data = fat)
+summary(AjusteMejor_subconjunto)
+### Comparación de BIC
+BIC(AjusteMejor_subconjunto, AjusteNulo)
+
+
+#### Medición del poder predictivo para efectos principales usando metrica MAE 
+modMS=function(x, IndTrain, Dat){
+  train= IndTrain[,x]
+  test = (-train)
+  ms = regsubsets(brozek ~ ., data = Dat[train,], nvmax = 15)  #Aplicamos metodo mejor subconjunto 
+  mss = summary(ms) #Vamos a crear un objeto para extrar el de menor BIC
+  mat <- cbind(mss$which, mss$bic) #Combinamos el criterio en una matriz con los modelos calculados
+  ndim = dim(mss$wich)  #Ajustamos tamaño 
+  ms1= round(mat, digits = 3) #Redondeamos por comodidad :p 
+  indice <- which.min(ms1[,ncol(ms1)])  #Seleccionamos el indice del mejor rankeado 
+  name = names(coef(ms, indice))[-1] #Quitamos el intercepto y guardamos el nombre de las variables 
+  forexp=as.formula(  paste('brozek ~', paste(paste(name ,collapse = ' + ')  ) ))  #Ajustamos la formula a usar 
+  mod_train=lm(forexp, data=Dat[train,]) #Ajustamos el modelo a entrenar 
+  pred_test=predict(mod_train, Dat[test,])
+  MSE=mean((Dat$brozek[test]-pred_test)^2)
+  return(MSE)
+}
+set.seed(1)
+#Aplicamos la fórmula 
+MSE.B.modMS= sapply(1:B,modMS, IndTrain=Partition, Dat=fat)
+(MSE.RHM.modMS=mean(MSE.B.modMS))
+
+
+#Medición del poder predictivo para efectos principales usando metrica MSE
+modMSMAE = function(x, IndTrain, Dat) {
+  train = IndTrain[, x]
+  test = (-train)
+  ms = regsubsets(brozek ~ ., data = Dat[train,], nvmax = 15)  #Aplicamos metodo mejor subconjunto 
+  mss = summary(ms) #Vamos a crear un objeto para extrar el de menor BIC
+  mat <- cbind(mss$which, mss$bic) #Combinamos el criterio en una matriz con los modelos calculados
+  ndim = dim(mss$wich)  #Ajustamos tamaño 
+  ms1= round(mat, digits = 3) #Redondeamos por comodidad :p 
+  indice <- which.min(ms1[,ncol(ms1)])  #Seleccionamos el indice del mejor rankeado 
+  name = names(coef(ms, indice))[-1] #Quitamos el intercepto y guardamos el nombre de las variables 
+  forexp=as.formula(  paste('brozek ~', paste(paste(name ,collapse = ' + ')  ) ))  #Ajustamos la formula a usar 
+  mod_train=lm(forexp, data=Dat[train,]) #Ajustamos el modelo a entrenar 
+  pred_test=predict(mod_train, Dat[test,])
+  MAE = mean(abs(Dat$brozek[test] - pred_test))
+  return(MAE)
+}
+set.seed(1)
+MAE.B.modMSMAE= sapply(1:B, modMSMAE, IndTrain=Partition, Dat=fat)
+(MAE.B.modMSEMAE=mean(MAE.B.modMSMAE))
+
+
+# Calculando las predicciones del modelo
+y_estimada10 <- predict(AjusteMejor_subconjunto)
+
+# Calculando el coeficiente de correlación
+coef_correlacion10 <- cor(fat$brozek, y_estimada10)
+
+# Imprimir el coeficiente de correlación
+print(coef_correlacion10)
+
+```
+\begin{table}[ht]
+\centering
+\begin{tabular}{|l|r|r|r|}
+\hline
+\textbf{Modelo} & \textbf{MSE} & \textbf{MAE} & \textbf{Coeficiente de correlación} \\ \hline
+Efectos principales & 17.16308 & 3.410629 & 0.8631222 \\ \hline
+Interacciones & 56.48963 & 5.46979 & 0.9177546 \\ \hline
+Variables al Cuadrado & 18.56875 & 3.493047 & 0.8743873 \\ \hline
+EfectosPrincipales\_BIC & 17.04808 & 3.41743 & 0.8561274 \\ \hline
+Interacciones\_BIC & 71.25154  & 3.382046 &  0.8607871 \\ \hline
+VariablesalCuadrado\_BIC & 17.47172 & 3.445213 & 0.8619548 \\ \hline
+EfectosPrincipales\_lasso & 16.70562 & 3.383621 & 0.8568989 \\ \hline
+Interacciones\_lasso & 16.62958 & 3.382046 & 0.856508 \\ \hline
+VariablesalCuadrado\_lasso & 17.02291 & 3.408702 & 0.858146 \\ \hline
+MejorSubconjunto & 17.17865 & 3.433325 & 0.8525693 \\ \hline
+\end{tabular}
+\caption{Modelos ajustados con métricas MSE, MAE y coeficiente de correlación.}
+\label{table:tabla_revisada}
+\end{table}
+
+
+
+Tras analizar cuales son las variables que se incluyen con más frecuencia en aquellos modelos donde se implementó algún método de selección de variables, es decir, los últimos 7 modelos del \textbf{Cuadro 1}, se halló que la variable que más se repite es la variable \textit{wrist} la cual se repite un total de 9 veces, seguida de la variable \textit{abdom} la cual se repite un total de 8 veces, y después la variable \textit{age} que se repite un total de 7 veces, \textit{neck} aparece 5 veces y \textit{biceps} aparece 4 veces. Por el contrario, las variables \textit{knee} y \textit{weight} no aparecen en ningun modelo, mientras que las variables \textit{adipos}, \textit{knee}, \textit{thigh} y \textit{forearm} aparecen todas ellas 2 veces. Esto indica que las variables \textit{wrist}, \textit{abdom} y \textit{age} son las variables con mayor poder predictivo pues son las que aparecen con mayor frecuencia en los modelos explorados, esto quiere decir que las medidas de la muñeca y el abdomen, así como la edad predicen de manera efectiva el valor promedio del porcentaje de grasa corporal en los hombres, las medidas del cuello y biceps tienen un menor poder predictivo para el promedio de porcentaje de grasa corporal y por otro lado las medidas de la \textit{rodilla} y el \textit{peso} no influyen en la predicción de la variable de interés.
+
+Además, de entre todos los modelos explorados, aquel que pedice el valor promedio del porcentaje de grasa corporal de manera óptima es el modelo que se obtiene tras realizar una selección de variables por el método de mejor subconjunto \textsuperscript{\textbf{[3]}}, pues es el modelo que muestra un mejor rendimiento en las métricas consideradas: tiene tanto para la métrica MSE como para la  métrica MAE un valor más bajo lo cual sugiere una mayor precisión y consistencia en las predicciones del modelo ajustado, además el valor de su coeficiente de correlación es 0.852569, cabe recordar que entre más se acerque este valor a 1 esto indica una mejor estimación de la variable respuesta, sin embargo el valor obtenida es razonable dado los valores obtenidos para el resto de modelos. Lo que ese modelo indica es que las variables que mejor predicen el valor promedio del porcentaje de grasa son \textit{wrist}, \textit{abdom} y \textit{height}. La regla obtenida es la siguiente \textsuperscript{\textbf{[3]}}:
+\begin{equation}
+\mathbb{E}(\hat{brozek}) = \beta_{1} * height + \beta_{2} * abdom + \beta_{3} * wrist
+\end{equation}
+
+Donde los valores que toman los coeficientes asociados a las variables son: $\beta_{1} =  -0.41845$, $\beta_{2} = 0.72312$ y $\beta_{3} = -1.48367$.
+Lo cual adquiere la siguiente interpretación: un aumento del 100\% en la medida de la altura \textit{height} está asociado a una disminución del $41 \%$ del promedio de porcentaje de grasa si se dejan el resto de variables fijas, un aumento del 100\% para la variable \textit{abdom}, que representa la medida del abdomen, está asociado a un aumento del $72\%$ del valor del promedio de porcentaje de grasa y por último, al dejar al resto de variables fijas notamos que un aumento del 100% de la variable wrist está asociado a una disminución de $148\%$ del promedio de porcentaje de grasa. Como se menciono anteriormente, en los modelos examinados, las variables \textit{height}, \textit{abdom} y \textit{wrist} destacan por su frecuente aparición, lo que implica su significativa influencia en la predicción del promedio de grasa corporal. Así, se concluye que una mayor altura o un tamaño de muñeca más grande en una persona se asocia con una predicción de menores niveles de grasa corporal. Por el contrario, un abdomen de mayor tamaño indica que esa persona tendrá una proporción más alta de grasa corporal.
+
+
+\textbf{Referencias a los chunks}
+\begin{itemize}
+\item \textbf{[1]} El código usado para implementar esto puede encontrarse en los chunks de código del archivo RMarkdown, específicamente los chunks Preprocesamiento(60)
+RemocionCasosExtraños(82).
+\item \textbf{[2]} Los respectivos modelos así como sus métodos de entrenamiento y validación se pueden encontrar en los siguientes chunks de código del archivo RMarkdown:
+PrimerosAjustes(línea de código 146), EfectosPrincipales\_SeleccionBIC (línea de código 340), ModeloInteracciones\_SeleccionBIC(línea de código 411), ModeloCuadratico\_SeleccionBIC(línea de código 485), MetodoLasso\_EfectosPrincipales(línea de código 474)
+MetodoLasso\_Interacciones(línea de código 674)
+Lasso\_VariablesAlCuadrado(línea de código 776)
+MejorSubconjunto(línea de código 873).
+Además de esto los summaries relevantes correspondientes a los modelos ajustados se pueden encontrar en las siguientes líneas de código:
+Ajuste\_EfectosPrincipales (línea 158), Ajuste\_Interacciones (línea 159), Ajuste\_VariablesAlCuadrado (línea 160), EfectosPrincipales\_BIC (línea 350), Interacciones\_BIC (línea 422), Ajuste\_Cuadrático (línea 512)
+EfectosPrincipales\_Lasso (línea 603) , Interacciones\_Lasso (línea 704), Ajuste\_Cuadrático\_Lasso (línea 804), AjusteMejor\_subconjunto (línea 906). 
+\item \textbf{[3]}. Consultar chunk de código \textit{MejorSubconjunto} ubicado en la línea de código 873
+\end{itemize}
